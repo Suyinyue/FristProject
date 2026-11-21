@@ -21,6 +21,7 @@ local Mob = require("entity.Mob")
 
 local CHUNK_SIZE = Config.World.CHUNK_SIZE
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
+local WORLD_HEIGHT = Config.World.WORLD_HEIGHT
 
 -- 可生成的生物类型
 local MOB_TYPES = { "ZOMBIE", "GHOST", "BOMBER", "ARCHER", "COW", "SHEEP", "PIG", "CHICKEN" }
@@ -60,6 +61,9 @@ end
 ---@field lastNight boolean|nil
 ---@field onChunkLoaded function|nil
 ---@field onMobDeath fun(mob: Mob)|nil
+---@field onBlocksCleared fun(cleared: table[])|nil
+---@field onExplosionEffect fun(center: Vector3, cleared: table[])|nil
+---@field mobExplodeCallback fun(mob: Mob, player: Player)
 local MobManager = {}
 MobManager.__index = MobManager
 
@@ -76,6 +80,11 @@ function MobManager.new(scene, world, biome)
     self.mobs = {}
     self.spawnTimer = Config.MobSpawning.SPAWN_INTERVAL
     self.lastNight = nil
+    self.onBlocksCleared = nil
+    self.onExplosionEffect = nil
+    self.mobExplodeCallback = function(mob, player)
+        self:explodeMob(mob, player)
+    end
     return self
 end
 
@@ -234,8 +243,85 @@ end
 function MobManager:spawnMobAt(mobType, bx, gh, bz)
     local pos = Vector3(bx * BLOCK_SIZE, gh * BLOCK_SIZE, bz * BLOCK_SIZE)
     local mob = Mob.new(self.scene, self.world, mobType, pos)
+    -- 炸弹人等 explodes 生物的死亡回调
+    mob.onExplode = self.mobExplodeCallback
     self.mobs[#self.mobs + 1] = mob
     return mob
+end
+
+-- ====================================================================
+-- 自爆结算（炸弹人）
+-- ====================================================================
+
+---炸弹人自爆：范围伤害玩家/生物、清除 2 格内方块、自身炸死
+---@param mob Mob
+---@param player Player
+function MobManager:explodeMob(mob, player)
+    local radiusBlocks = mob.def.explosionRadius or 2.0
+    local radiusWorld = radiusBlocks * BLOCK_SIZE
+    local center = mob:getPosition()
+
+    -- 1) 玩家（距离按 3D 计算）
+    if player and not player:isDead() then
+        local pp = player:getPosition()
+        local dx = pp.x - center.x
+        local dy = pp.y - center.y
+        local dz = pp.z - center.z
+        if dx * dx + dy * dy + dz * dz <= radiusWorld * radiusWorld then
+            player:takeDamage(mob.attack)
+        end
+    end
+
+    -- 2) 范围内的其它生物（同类也会被炸）
+    for _, other in ipairs(self.mobs) do
+        if other ~= mob and not other:isDead() then
+            local op = other:getPosition()
+            local dx = op.x - center.x
+            local dy = op.y - center.y
+            local dz = op.z - center.z
+            if dx * dx + dy * dy + dz * dz <= radiusWorld * radiusWorld then
+                other:takeDamage(mob.attack)
+            end
+        end
+    end
+
+    -- 3) 清除范围内的方块（基岩除外）
+    local cbx = math.floor(center.x / BLOCK_SIZE)
+    local cby = math.floor(center.y / BLOCK_SIZE)
+    local cbz = math.floor(center.z / BLOCK_SIZE)
+    local r = math.ceil(radiusBlocks)
+    ---@type { x: integer, y: integer, z: integer, blockType: number }[]
+    local cleared = {}
+
+    for dx = -r, r do
+        for dy = -r, r do
+            for dz = -r, r do
+                if dx * dx + dy * dy + dz * dz <= radiusBlocks * radiusBlocks then
+                    local bx, by, bz = cbx + dx, cby + dy, cbz + dz
+                    if by >= 0 and by < WORLD_HEIGHT then
+                        local old = self.world:getBlock(bx, by, bz)
+                        if old ~= Blocks.AIR and not Blocks:isUnbreakable(old) then
+                            self.world:setBlock(bx, by, bz, Blocks.AIR)
+                            cleared[#cleared + 1] = { x = bx, y = by, z = bz, blockType = old }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 4) 自己也会被炸死
+    mob:kill()
+
+    if #cleared > 0 and self.onBlocksCleared then
+        self.onBlocksCleared(cleared)
+    end
+    if self.onExplosionEffect then
+        self.onExplosionEffect(center, cleared)
+    end
+
+    print(string.format("[Mobs] BOMBER 自爆：清除 %d 个方块（范围 %.0f 格）",
+        #cleared, radiusBlocks))
 end
 
 -- ====================================================================

@@ -44,6 +44,7 @@ local BLOCK_SIZE = Config.World.BLOCK_SIZE
 ---@field moving boolean
 ---@field airborne boolean
 ---@field yaw number
+---@field onExplode fun(mob: Mob, player: Player)|nil
 local Mob = {}
 Mob.__index = Mob
 
@@ -82,6 +83,7 @@ function Mob.new(scene, world, mobType, spawnPos)
     self.moving = false
     self.airborne = false
     self.yaw = 0.0
+    self.onExplode = nil
 
     -- 性能缓存
     self.groundY = spawnPos.y
@@ -122,6 +124,16 @@ function Mob:takeDamage(rawAttack)
         self.dead = true
     end
     self.healthBar:setHealth(self.health, self.maxHealth)
+end
+
+---直接杀死（自爆等不经过普通伤害判定的死亡）
+function Mob:kill()
+    if self.dead then
+        return
+    end
+    self.health = 0
+    self.dead = true
+    self.healthBar:setHealth(0, self.maxHealth)
 end
 
 ---是否死亡
@@ -249,6 +261,11 @@ function Mob:update(dt, player)
         end
 
         if distXZ <= attackRangeWorld and self.attackCooldown <= 0 then
+            if self.def.explodes and self.onExplode then
+                -- 炸弹人：进入攻击距离立即自爆（由 MobManager 结算范围伤害/清方块/自身死亡）
+                self.onExplode(self, player)
+                return
+            end
             if not player:isDead() then
                 player:takeDamage(self.attack)
             end

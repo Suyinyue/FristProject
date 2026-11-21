@@ -66,9 +66,10 @@ GameConfig.Mobs = {
     -- 敌对生物
     ZOMBIE  = { name = "僵尸",   hostile = true,  attack = 100, armor = 10, health = 100, ranged = false, fly = false, speed = 3.0, range = 2.0, spawnTime = "night", category = "monster", weight = 10, group = {1, 3}, biomes = {"plains", "forest", "desert"}, ground = {"grass", "dirt", "sand", "stone", "snow"}, color = {0.35, 0.55, 0.25}, size = {0.8, 1.8, 0.6} },
     GHOST   = { name = "幽灵",   hostile = true,  attack = 50,  armor = 10, health = 50,  ranged = false, fly = true,  speed = 4.0, range = 2.0, spawnTime = "night", category = "monster", weight = 5,  group = {1, 2}, biomes = {"plains", "forest", "desert"}, ground = {"any"}, color = {0.82, 0.82, 0.95}, size = {0.8, 1.6, 0.6} },
-    -- 炸弹人：Design.md「近战攻击，可以飞行」「行动：行走」
-    -- 平时步行走路，玩家在高处/空中时起飞追击（canFly = true）
-    BOMBER  = { name = "炸弹人", hostile = true,  attack = 200, armor = 10, health = 50,  ranged = false, fly = false, canFly = true, flySpeed = 4.5, speed = 3.5, range = 2.0, spawnTime = "any",   category = "monster", weight = 4,  group = {1, 2}, biomes = {"plains", "forest", "desert"}, ground = {"grass", "dirt", "sand", "stone"}, color = {0.20, 0.20, 0.24}, size = {0.9, 1.6, 0.9} },
+    -- 炸弹人：Design.md「近战攻击，攻击时会爆炸，将周围2格内所有生物造成伤害，
+    -- 2格的方块清除掉，同时自己也会被炸死」「行动：行走」
+    -- explodes / explosionRadius 让 MobManager 执行自爆结算
+    BOMBER  = { name = "炸弹人", hostile = true,  attack = 300, armor = 10, health = 30,  ranged = false, fly = false, speed = 3.5, range = 2.0, explodes = true, explosionRadius = 2.0, spawnTime = "any", category = "monster", weight = 4, group = {1, 2}, biomes = {"plains", "forest", "desert"}, ground = {"grass", "dirt", "sand", "stone"}, color = {0.20, 0.20, 0.24}, size = {0.9, 1.6, 0.9} },
     ARCHER  = { name = "弓箭手", hostile = true,  attack = 100, armor = 10, health = 50,  ranged = true,  fly = false, speed = 3.0, range = 8.0, spawnTime = "any",   category = "monster", weight = 4,  group = {1, 2}, biomes = {"plains", "forest"}, ground = {"grass", "dirt", "stone"}, color = {0.55, 0.35, 0.20}, size = {0.8, 1.7, 0.6} },
 
     -- 中立生物

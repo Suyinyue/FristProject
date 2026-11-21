@@ -11,6 +11,7 @@
 -- ====================================================================
 
 local Config = require("config.GameConfig")
+local Blocks = require("data.BlockRegistry")
 local World = require("world.World")
 local WorldGenerator = require("world.WorldGenerator")
 local ChunkStreamer = require("world.ChunkStreamer")
@@ -89,6 +90,10 @@ local timeUiTimer_ = 0.0
 
 -- 物品系统存档计时
 local itemSaveTimer_ = 0.0
+
+-- 炸弹人自爆的短暂闪光
+---@type { node: Node, light: Light, life: number, maxLife: number }[]
+local explosionFlashes_ = {}
 
 -- ============================================================================
 -- 初始化
@@ -282,6 +287,19 @@ function Standalone.OnWorldReady()
         return mobManager_ and mobManager_.mobs or {}
     end)
 
+    -- 炸弹人自爆：清掉方块后同步防御塔（可能炸掉基座/火焰石）
+    mobManager_.onBlocksCleared = function(_cleared)
+        if towerManager_ then
+            towerManager_:rebuildTowers()
+        end
+    end
+    mobManager_.onExplosionEffect = function(center, cleared)
+        Standalone.spawnExplosionEffect(center, cleared)
+    end
+
+    -- 开局在出生点附近预置一座防御塔
+    Standalone.buildSpawnTower()
+
     -- 新加载区块：额外尝试一次「环境原生动物」生成（Design.md）
     chunkStreamer_.onChunkLoaded = function(cx, cz)
         if mobManager_ and player_ then
@@ -302,6 +320,111 @@ function Standalone.OnWorldReady()
     benchmark_ = Benchmark.new(world_, blockInteraction_, chunkBuilder_, worldGenerator_)
 
     print("=== Minecraft Standalone Ready ===")
+end
+
+---自爆特效：碎块粒子 + 短暂点光源
+---@param center Vector3
+---@param cleared { x: integer, y: integer, z: integer, blockType: number }[]
+function Standalone.spawnExplosionEffect(center, cleared)
+    local ps = GameSystems:getParticleSystem()
+    if ps and #cleared > 0 then
+        local samples = math.min(8, #cleared)
+        for i = 1, samples do
+            local idx = math.floor((i - 1) * #cleared / samples) + 1
+            local b = cleared[idx]
+            ps:spawnBreakParticles(b.x, b.y, b.z, b.blockType)
+        end
+    end
+
+    if not scene_ then
+        return
+    end
+
+    local node = scene_:CreateChild("ExplosionFlash")
+    node.position = center + Vector3(0, Config.World.BLOCK_SIZE * 0.8, 0)
+    local light = node:CreateComponent("Light")
+    light.lightType = LIGHT_POINT
+    light.color = Color(1.0, 0.55, 0.15)
+    light.range = 16.0
+    light.brightness = 8.0
+    light.castShadows = false
+
+    explosionFlashes_[#explosionFlashes_ + 1] = {
+        node = node, light = light, life = 0.3, maxLife = 0.3,
+    }
+end
+
+---在出生点附近生成一座 2 层防御塔（范围 6 格）
+function Standalone.buildSpawnTower()
+    if not towerManager_ or not world_ then
+        return
+    end
+
+    local spawnBX, spawnBZ = 0, 0
+    local candidates = {
+        { 4, 0 }, { -6, 0 }, { 0, 6 }, { 0, -6 },
+        { 6, 6 }, { -6, -6 }, { 8, 0 }, { -8, 0 },
+    }
+
+    ---@type { bx: integer, bz: integer, y: integer }|nil
+    local chosen = nil
+
+    for _, off in ipairs(candidates) do
+        local bx = spawnBX + off[1]
+        local bz = spawnBZ + off[2]
+        local maxH, minH = -1, 999
+        for dx = 0, 2 do
+            for dz = 0, 1 do
+                local h = world_:getGroundHeight(bx + dx, bz + dz)
+                if h > maxH then maxH = h end
+                if h < minH then minH = h end
+            end
+        end
+
+        if maxH > Config.World.WATER_LEVEL + 2
+            and maxH + 4 < Config.World.WORLD_HEIGHT
+            and (maxH - minH) <= 2 then
+            chosen = { bx = bx, bz = bz, y = maxH }
+            break
+        end
+    end
+
+    if not chosen then
+        local bx = spawnBX + 4
+        chosen = { bx = bx, bz = spawnBZ, y = math.floor(world_:getGroundHeight(bx + 1, spawnBZ)) }
+    end
+    if not chosen then
+        return
+    end
+
+    local bx, bz, y0 = chosen.bx, chosen.bz, chosen.y
+
+    -- 清空脚印上方 3 格（避免树/地形卡进塔里）
+    for dx = 0, 2 do
+        for dz = 0, 1 do
+            for dy = 0, 2 do
+                world_:setBlock(bx + dx, y0 + dy, bz + dz, Blocks.AIR)
+            end
+        end
+    end
+
+    -- 底层 3×2 = 6 块金刚岩
+    for dx = 0, 2 do
+        world_:setBlock(bx + dx, y0, bz, Blocks.ADAMANT)
+        world_:setBlock(bx + dx, y0, bz + 1, Blocks.ADAMANT)
+    end
+    -- 顶层 3 块金刚岩
+    for dx = 0, 2 do
+        world_:setBlock(bx + dx, y0 + 1, bz, Blocks.ADAMANT)
+    end
+
+    -- 火焰石（攻击台）
+    local fx, fy, fz = bx + 1, y0 + 2, bz
+    world_:setBlock(fx, fy, fz, Blocks.FLAME_STONE)
+    towerManager_:trackFlameStone(fx, fy, fz)
+    towerManager_:rebuildTowers()
+
+    print(string.format("[Tower] 出生点附近已生成防御塔 (%d,%d,%d)", fx, fy, fz))
 end
 
 ---初始装备（没有物品存档时）
@@ -382,6 +505,18 @@ function HandleUpdate(eventType, eventData)
             end
         end
         return
+    end
+
+    -- 自爆闪光淡出
+    for i = #explosionFlashes_, 1, -1 do
+        local flash = explosionFlashes_[i]
+        flash.life = flash.life - timeStep
+        if flash.life <= 0 then
+            flash.node:Remove()
+            table.remove(explosionFlashes_, i)
+        else
+            flash.light.brightness = 8.0 * (flash.life / flash.maxLife)
+        end
     end
 
     -- 死亡：等待重生
@@ -508,6 +643,13 @@ function Standalone.Stop()
     if player_ then
         ItemSaveSystem.save(player_, itemDropSystem_)
     end
+
+    for _, flash in ipairs(explosionFlashes_) do
+        if flash.node then
+            flash.node:Remove()
+        end
+    end
+    explosionFlashes_ = {}
 
     if towerManager_ then
         towerManager_:destroy()

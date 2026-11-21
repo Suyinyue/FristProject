@@ -40,6 +40,10 @@ V.atFrame(1200, function()
     ctx = GetDebugGameContext()
     V.assert(ctx ~= nil and ctx.world ~= nil and ctx.towerManager ~= nil, "拿不到单机上下文")
 
+    -- 开局出生点附近应预置 1 座防御塔
+    V.assert(ctx.towerManager:getTowerCount() == 1,
+        "出生点附近应预置 1 座防御塔，实际 " .. ctx.towerManager:getTowerCount())
+
     local p = ctx.player:getPosition()
     local bx = math.floor(p.x / BS) + 10
     local bz = math.floor(p.z / BS) + 10
@@ -66,16 +70,25 @@ end)
 
 -- 2. 检查塔参数，并在范围内生成一只僵尸
 V.atFrame(1320, function()
-    V.assert(ctx.towerManager:getTowerCount() == 1,
-        "同一基座 2 个火焰石应只激活 1 座塔，实际 " .. ctx.towerManager:getTowerCount())
-    V.assert(ctx.towerManager:getFlameStoneCount() == 2,
-        "火焰石计数应为 2，实际 " .. ctx.towerManager:getFlameStoneCount())
+    -- 预置塔 + 测试塔 = 2 座；测试基座上 2 个火焰石只激活 1 个
+    V.assert(ctx.towerManager:getTowerCount() == 2,
+        "应为预置塔 + 测试塔共 2 座，实际 " .. ctx.towerManager:getTowerCount())
+    V.assert(ctx.towerManager:getFlameStoneCount() == 3,
+        "火焰石计数应为 3（预置 1 + 测试 2），实际 " .. ctx.towerManager:getFlameStoneCount())
 
-    local t = ctx.towerManager:getTower(1)
-    V.assert(t ~= nil, "没有找到激活的防御塔")
-    if t then
-        V.assert(t.layers == 2, "基座层数应为 2，实际 " .. t.layers)
-        V.assert(t.range == 6, "攻击范围应为 6 格，实际 " .. t.range)
+    -- 找到测试塔（同基座同层数时按坐标选出左上那个火焰石）
+    ---@type DefenseTower|nil
+    local testTower = nil
+    for i = 1, ctx.towerManager:getTowerCount() do
+        local t = ctx.towerManager:getTower(i)
+        if t and t.x == towerPos.x and t.y == towerPos.y + 2 and t.z == towerPos.z then
+            testTower = t
+        end
+    end
+    V.assert(testTower ~= nil, "没有找到新建的测试防御塔")
+    if testTower then
+        V.assert(testTower.layers == 2, "基座层数应为 2，实际 " .. testTower.layers)
+        V.assert(testTower.range == 6, "攻击范围应为 6 格，实际 " .. testTower.range)
     end
 
     -- 直接生成在火焰石正上方：距离最近，保证两次攻击内不会走出范围
@@ -104,7 +117,7 @@ V.atFrame(1650, function()
 end)
 
 V.atFrame(1700, function()
-    V.assert(ctx.towerManager:getTowerCount() == 1,
+    V.assert(ctx.towerManager:getTowerCount() == 2,
         "只有 2 块金刚岩的基座不应成塔，实际塔数 " .. ctx.towerManager:getTowerCount())
 end)
 
@@ -116,6 +129,7 @@ V.atFrame(1750, function()
 end)
 
 V.atFrame(1800, function()
-    V.assert(ctx.towerManager:getTowerCount() == 0,
-        "破坏基座顶层后塔应失效，实际塔数 " .. ctx.towerManager:getTowerCount())
+    -- 测试塔失效，只剩出生点预置塔
+    V.assert(ctx.towerManager:getTowerCount() == 1,
+        "破坏基座顶层后测试塔应失效，实际塔数 " .. ctx.towerManager:getTowerCount())
 end)
