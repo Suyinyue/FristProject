@@ -9,7 +9,7 @@
 > - `Design.md`：玩法需求（体素世界、血条、生物生成、**AI 机制**、物品、**建筑/防御塔**）
 > - `engine-docs/`、`examples/`、`urhox-libs/`、`.emmylua/`：引擎 API 与示例（以这些为准，不要凭 Urho3D 记忆写代码）
 
-最后更新：2026-11-21（物品系统、防御塔、炸弹人自爆、出生点预置塔、生物 AI 已完成）
+最后更新：2026-11-21（物品系统、防御塔、炸弹人自爆、出生点 5 层预置塔、生物 AI、矿石系统、夜晚全量追踪与权重增长已完成）
 
 ---
 
@@ -216,6 +216,7 @@ OnWorldReady()
 - 群系：`PLAINS=2 / FOREST=3 / DESERT=4 / MOUNTAINS=5`（`terrain/BiomeGenerator.lua`）。
 - 世界：`CHUNK_SIZE=16`，`WORLD_HEIGHT=80`，`WATER_LEVEL=37`，`RENDER_DISTANCE=6`。
 - 已实现的地质特征（`Features.RICH_TERRAIN=true`）：基岩地板、按深度分布的矿脉、砂砾团、黏土、高山雪线、深层岩浆池。
+- **矿石生成（Design.md「矿石」）**：`WorldGenerator` 里的 `GEO_FEATURES` 是矿石配置的唯一真源，含 10 种矿石（煤/铁/金/青金/红石/钻石 + 新增铜/绿宝石/金刚岩矿/火焰石矿）。每条矿脉用「空间格哈希 + 确定性随机游走」生成（同种子必复现、天然跨区块连贯、只替换石头）。参数：`minY/maxY`（高度范围）、`peakY`（三角分布峰值，缺省均匀）、`chance`（峰值概率）、`sizeMin/sizeMax`（矿脉大小）、`biomes`（群系限制，绿宝石/火焰石只出山地）。
 - `Features.GENERATE_TREES / GENERATE_VEGETATION / SPAWN_HOUSE` 目前为 **false**（装饰器存在但默认关闭）。
 - 生成顺序：地形 → 水 → 矿脉/地质特征 → 天光灌注 → 光源方块补 blockLight。
 
@@ -249,7 +250,8 @@ OnWorldReady()
 | 透明/羊毛/植物 | 38–48 | 玻璃、6 色羊毛、树苗、枯木、蘑菇 |
 | 半砖/楼梯 | 49–60 | 6 种材质的半砖与楼梯（循环注册） |
 | 门窗栅栏 | 61–65 | 木栅栏、圆石墙、木门、铁门、活板门 |
-| **建筑（新增）** | **66–67** | **火焰石（发光）、金刚岩** |
+| **建筑** | **66–67** | **火焰石（发光）、金刚岩** |
+| **新增矿石** | **68–71** | **铜矿、绿宝石矿、金刚岩矿、火焰石矿** |
 
 常用 API：
 
@@ -366,7 +368,8 @@ Blocks:getColor(id) / getDisplayName(id) / getPlaceableBlocks()
 AI 由 `entity/ai/` 的通用框架驱动（参数集中在 `GameConfig.MobAI`），不针对单一生物硬编码：
 
 - **状态机**：`IDLE`（待机）→ `WANDERING`（随机游走）→ `CHASING`（追踪）→ `ATTACKING`（攻击）。敌对生物在 IDLE/WANDERING 期间持续检测目标，发现即转入 CHASING；中立生物只在 IDLE/WANDERING 之间循环。
-- **目标检测**：`DETECT_RANGE=16` 格内且视线通畅（`REQUIRE_LOS`，隔墙不发现）才锁定；目标超出 `LOSE_RANGE=24` 格、死亡，或长时间不可见/不可达（`LOSE_TIME=10s`）则放弃，避免在检测边缘来回切换。
+- **目标检测**：`DETECT_RANGE=16` 格内且视线通畅（`REQUIRE_LOS`，隔墙不发现）才锁定；目标超出 `LOSE_RANGE=24` 格、死亡，或长时间不可见/不可达（`LOSE_TIME=10s`）则放弃，避免在检测边缘来回切换。**夜晚特殊规则（Design.md「敌对生物」）：敌对生物无视距离与视线，全部锁定玩家并追踪攻击。**
+- **生成权重随时间增长（Design.md「敌对生物」）**：每过一天（夜晚→天亮），敌对怪物的生成权重 ×1.1（`MobManager.dayCount` → `getSpawnWeight`）。
 - **寻路**：地面生物走方块级 A*（`Pathfinding.lua`，支持绕障、登高 1 格、有限下落 ≤3 格、不穿墙不进液体）；路径按「目标移动超阈值 / 到重算间隔 / 路径走完」才重算。飞行生物（幽灵）直线追击。
 - **近战攻击**：进入 `ATTACK_RANGE=1.5` 格后站定面向目标，`ATTACK_INTERVAL=1.5s` 冷却后走玩家伤害系统；远程（弓箭手）与自爆（炸弹人）沿用各自 `def.range` 与 `def.explodes`。
 - **性能**：重决策（检测/状态切换/重算路径）按 `TICK_INTERVAL=0.2s` 节流，逐帧只做沿路径移动；超过 `RENDER_CULL_DISTANCE=72` 的生物跳过 AI 更新。
@@ -567,8 +570,8 @@ blockId
 ### 8.3 攻击
 
 - 每 `ATTACK_INTERVAL=1s`：找范围内**最近敌对生物**（3D 距离 ≤ `range * BLOCK_SIZE`）。
-- 造成 `ATTACK=500` 攻击力伤害（`mob:takeDamage`，按护甲结算）。
-- 视觉：火焰石到目标的橙色射线光束（0.18s 淡出）+ 塔顶点光源呼吸。
+- 造成 **`层数 × ATTACK_PER_LAYER(100)`** 攻击力伤害（`mob:takeDamage`，按护甲结算；Design.md「防御塔」）。
+- 视觉：火焰石到目标的橙色射线光束（0.18s 淡出）+ 塔顶点光源呼吸 + **半透明光罩**（`Sphere.mdl`，半径 = 攻击范围，`SHIELD_ALPHA` 调透明度）。
 - 火焰石方块本身也发光（blockLight 半径 12）。
 - 防御塔重建触发：
   - 玩家放置/破坏金刚岩或火焰石（`BlockInteraction` → `onBlockChanged`）
@@ -748,6 +751,7 @@ npx -y @taptap/maker preview validate --mode validate \
 | `TowerCheck.lua` | 出生点预置塔存在、2 层塔范围 6、同基座 2 火焰石只激活 1 个、塔击杀僵尸、2 块基座不成塔、破坏顶层后失效 |
 | `BomberCheck.lua` | 玩家受到自爆伤害、2 格内僵尸受伤、2 格内方块被清除、炸弹人死亡 |
 | `MobAiCheck.lua` | 中立生物不追击、检测范围外僵尸不追击、检测范围内僵尸进入追击、近身僵尸攻击掉血（状态机 + 检测 + 攻击接线） |
+| `OreCheck.lua` | 扫描出生点地下，常见矿石（煤/铁/铜/金刚岩）必须生成；稀有矿石只统计 |
 
 ### 12.4 已知噪音
 
@@ -825,12 +829,13 @@ npx -y @taptap/maker preview validate --mode validate \
 
 ### 14.2 防御塔待实现/待对齐（Design.md 最新版）
 
-最新版 Design.md 对防御塔的要求更细，当前实现需要对齐的点：
+> 已对齐（2026-11-21）：攻击力改为 **层数 × 100**（原固定 500）、增加**攻击范围半透明光罩**。
+> 仍待对齐的点：
 
 | 需求（最新 Design.md） | 当前实现 |
 |---|---|
 | 攻击间隔 **2 秒** | `Config.Tower.ATTACK_INTERVAL = 1.0` |
-| 攻击伤害 **10** | `Config.Tower.ATTACK = 500` |
+| 攻击伤害 **10**（§五 初始参数） | 攻击力 = 层数 × 100（`ATTACK_PER_LAYER`），按护甲结算；与「攻击力 100×层数」新要求一致，未单独对齐「伤害 10」 |
 | 发射**独立火焰弹**（速度 10 格/秒，命中结算） | 瞬时光束（`spawnBeam`）+ 立即 `mob:takeDamage` |
 | 基座中间缺一层 → **整个基座不合法、不能激活** | 自上而下检测，遇缺层会在当前层数停止，可能按较短的塔激活 |
 | 模块：DefenseTowerManager / Detector / Controller / FlameStoneController / FireProjectile | 目前集中在 `building/TowerManager.lua` 一个模块 |
@@ -853,9 +858,12 @@ npx -y @taptap/maker preview validate --mode validate \
 - 完整生物生成机制（区块候选、环境筛选、权重、群体、上限、消失、新区块原生生成）
 - 生物 AI：`entity/ai/` 状态机 + 方块级 A* 寻路 + 视线检测 + 目标保持，重决策与渲染帧解耦
 - 完整物品系统（定义/实例/背包/掉落/使用/耐久/合成/UI/存档）
-- 防御塔建筑系统 + 出生点预置塔
+- 防御塔建筑系统 + 出生点 5 层预置塔
 - 炸弹人改为 300/10/30、行走、攻击自爆（范围伤害 + 清方块 + 自爆死亡）
-- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck
+- 矿石系统扩展：新增铜/绿宝石/金刚岩矿/火焰石矿 4 种方块，矿石生成加高度三角分布 + 群系限制
+- 敌对生物夜晚无视距离全量追踪；敌对生成权重每天 ×1.1
+- 防御塔攻击力改为 层数 × 100，新增攻击范围半透明光罩
+- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck
 - Git Stop Hook 自动提交/推送（github/dev）
 
 ---

@@ -355,6 +355,7 @@ end
 ---@return number
 function MobManager:getSpawnWeight(mobType)
     local def = Config.Mobs[mobType]
+    ---@type number
     local w = def and def.weight or 1
     if def and def.category == "monster" and self.dayCount > 0 then
         w = w * (1.1 ^ self.dayCount)

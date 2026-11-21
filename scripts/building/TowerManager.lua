@@ -38,6 +38,21 @@ local function getBeamMaterial()
     return beamMaterial
 end
 
+-- 共享光罩材质（半透明，提示攻击范围）
+---@type Material|nil
+local shieldMaterial = nil
+
+---@return Material
+local function getShieldMaterial()
+    if not shieldMaterial then
+        shieldMaterial = Material:new()
+        shieldMaterial:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
+        local a = Config.Tower.SHIELD_ALPHA or 0.10
+        shieldMaterial:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.55, 0.20, a)))
+    end
+    return shieldMaterial
+end
+
 ---@class DefenseTower
 ---@field x integer 火焰石方块坐标
 ---@field y integer
@@ -48,6 +63,7 @@ end
 ---@field pulse number
 ---@field lightNode Node|nil
 ---@field light Light|nil
+---@field shieldNode Node|nil
 
 ---@class TowerBeam
 ---@field node Node
@@ -258,13 +274,17 @@ function TowerManager:onBlockChanged(x, y, z, oldType, newType)
     end
 end
 
----清除所有塔的灯光节点
+---清除所有塔的灯光节点与光罩
 function TowerManager:clearTowerLights()
     for _, tower in ipairs(self.towers) do
         if tower.lightNode then
             tower.lightNode:Remove()
             tower.lightNode = nil
             tower.light = nil
+        end
+        if tower.shieldNode then
+            tower.shieldNode:Remove()
+            tower.shieldNode = nil
         end
     end
 end
@@ -341,7 +361,7 @@ function TowerManager:rebuildTowers()
     end
 end
 
----给激活的塔创建火焰石点光源
+---给激活的塔创建火焰石点光源 + 攻击范围光罩
 ---@param tower DefenseTower
 function TowerManager:createTowerLight(tower)
     local node = self.scene:CreateChild("TowerLight")
@@ -359,6 +379,21 @@ function TowerManager:createTowerLight(tower)
 
     tower.lightNode = node
     tower.light = light
+
+    -- 光罩：以火焰石为中心的半透明球，半径 = 攻击范围（Design.md「攻击范围光罩提示」）
+    local shield = self.scene:CreateChild("TowerShield")
+    shield.position = Vector3(
+        tower.x * BLOCK_SIZE + BLOCK_SIZE * 0.5,
+        tower.y * BLOCK_SIZE + BLOCK_SIZE * 0.5,
+        tower.z * BLOCK_SIZE + BLOCK_SIZE * 0.5)
+    -- Sphere.mdl 直径 1（半径 0.5），缩放到攻击范围半径
+    local radius = tower.range * BLOCK_SIZE
+    shield.scale = Vector3(radius * 2, radius * 2, radius * 2)
+    local model = shield:CreateComponent("StaticModel")
+    model.model = cache:GetResource("Model", "Models/Sphere.mdl")
+    model.material = getShieldMaterial()
+
+    tower.shieldNode = shield
 end
 
 -- ====================================================================
@@ -474,7 +509,8 @@ function TowerManager:update(dt)
         if tower.cooldown <= 0 then
             local target = self:findTarget(tower)
             if target then
-                target:takeDamage(cfg.ATTACK)
+                -- 攻击力 = 100 × 层数（Design.md「防御塔」）
+                target:takeDamage(tower.layers * cfg.ATTACK_PER_LAYER)
                 self:spawnBeam(tower, target)
                 tower.cooldown = cfg.ATTACK_INTERVAL
             else
