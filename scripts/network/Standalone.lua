@@ -354,7 +354,7 @@ function Standalone.spawnExplosionEffect(center, cleared)
     }
 end
 
----在出生点附近生成一座 2 层防御塔（范围 6 格）
+---在出生点附近生成一座 5 层防御塔（范围 15 格）
 function Standalone.buildSpawnTower()
     if not towerManager_ or not world_ then
         return
@@ -362,27 +362,29 @@ function Standalone.buildSpawnTower()
 
     local spawnBX, spawnBZ = 0, 0
     local candidates = {
-        { 4, 0 }, { -6, 0 }, { 0, 6 }, { 0, -6 },
-        { 6, 6 }, { -6, -6 }, { 8, 0 }, { -8, 0 },
+        { 6, 0 }, { -8, 0 }, { 0, 8 }, { 0, -8 },
+        { 8, 8 }, { -8, -8 }, { 10, 0 }, { -10, 0 },
     }
 
     ---@type { bx: integer, bz: integer, y: integer }|nil
     local chosen = nil
 
+    -- 5 层塔的基座脚印：X 宽 3、Z 深 5（顶层只有 Z 深 1，往下逐层加宽）
     for _, off in ipairs(candidates) do
         local bx = spawnBX + off[1]
         local bz = spawnBZ + off[2]
         local maxH, minH = -1, 999
         for dx = 0, 2 do
-            for dz = 0, 1 do
+            for dz = 0, 4 do
                 local h = world_:getGroundHeight(bx + dx, bz + dz)
                 if h > maxH then maxH = h end
                 if h < minH then minH = h end
             end
         end
 
+        -- 塔高 6 格（5 层基座 + 火焰石），需要头顶留足高度
         if maxH > Config.World.WATER_LEVEL + 2
-            and maxH + 4 < Config.World.WORLD_HEIGHT
+            and maxH + 6 < Config.World.WORLD_HEIGHT
             and (maxH - minH) <= 2 then
             chosen = { bx = bx, bz = bz, y = maxH }
             break
@@ -390,7 +392,7 @@ function Standalone.buildSpawnTower()
     end
 
     if not chosen then
-        local bx = spawnBX + 4
+        local bx = spawnBX + 6
         chosen = { bx = bx, bz = spawnBZ, y = math.floor(world_:getGroundHeight(bx + 1, spawnBZ)) }
     end
     if not chosen then
@@ -399,32 +401,33 @@ function Standalone.buildSpawnTower()
 
     local bx, bz, y0 = chosen.bx, chosen.bz, chosen.y
 
-    -- 清空脚印上方 3 格（避免树/地形卡进塔里）
+    -- 清空脚印上方 6 格（5 层基座 + 火焰石，避免树/地形卡进塔里）
     for dx = 0, 2 do
-        for dz = 0, 1 do
-            for dy = 0, 2 do
+        for dz = 0, 4 do
+            for dy = 0, 5 do
                 world_:setBlock(bx + dx, y0 + dy, bz + dz, Blocks.AIR)
             end
         end
     end
 
-    -- 底层 3×2 = 6 块金刚岩
-    for dx = 0, 2 do
-        world_:setBlock(bx + dx, y0, bz, Blocks.ADAMANT)
-        world_:setBlock(bx + dx, y0, bz + 1, Blocks.ADAMANT)
-    end
-    -- 顶层 3 块金刚岩
-    for dx = 0, 2 do
-        world_:setBlock(bx + dx, y0 + 1, bz, Blocks.ADAMANT)
+    -- 从下往上搭 5 层金刚岩：第 k 层（k=1 为顶层）正好 3*k 块。
+    -- 每层是一条 X 宽 3、Z 深 k 的矩形：k=5(底)15 块 → k=1(顶)3 块。
+    for k = 5, 1, -1 do
+        local y = y0 + (5 - k)          -- k=5 → y0，k=1 → y0+4
+        for dx = 0, 2 do
+            for dz = 0, k - 1 do
+                world_:setBlock(bx + dx, y, bz + dz, Blocks.ADAMANT)
+            end
+        end
     end
 
-    -- 火焰石（攻击台）
-    local fx, fy, fz = bx + 1, y0 + 2, bz
+    -- 火焰石（攻击台）：放在顶层正中间
+    local fx, fy, fz = bx + 1, y0 + 5, bz
     world_:setBlock(fx, fy, fz, Blocks.FLAME_STONE)
     towerManager_:trackFlameStone(fx, fy, fz)
     towerManager_:rebuildTowers()
 
-    print(string.format("[Tower] 出生点附近已生成防御塔 (%d,%d,%d)", fx, fy, fz))
+    print(string.format("[Tower] 出生点附近已生成 5 层防御塔 (%d,%d,%d)，范围 15 格", fx, fy, fz))
 end
 
 ---初始装备（没有物品存档时）
