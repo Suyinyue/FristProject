@@ -48,18 +48,29 @@ V.atFrame(1100, function()
     local spawnX = math.floor(p.x / BS)
     local spawnZ = math.floor(p.z / BS)
 
+    -- 找一块 2×2 都同高的平坦地面，保证炸弹人/僵尸与玩家同层、视线通畅，
+    -- 且爆炸中心（炸弹人脚下）与测试方块的高差不受地形起伏影响。
+    -- 用环形搜索覆盖更大范围（出生点周围 ±20 格），避免固定候选点恰好落在坡上。
     local px, pz, gh
-    local candidates = {
-        { -10, 0 }, { -12, 4 }, { 12, 0 }, { 0, 12 },
-        { -8, -8 }, { 16, 0 }, { 0, -16 },
-    }
-    for _, off in ipairs(candidates) do
-        local x, z = spawnX + off[1], spawnZ + off[2]
-        local h = ctx.world:getGroundHeight(x, z)
-        if h > Config.World.WATER_LEVEL + 3 then
-            px, pz, gh = x, z, h
-            break
+    for r = 0, 20 do
+        for dx = -r, r do
+            for dz = -r, r do
+                if math.max(math.abs(dx), math.abs(dz)) == r then
+                    local x = spawnX + dx
+                    local z = spawnZ + dz
+                    local h = ctx.world:getGroundHeight(x, z)
+                    if h > Config.World.WATER_LEVEL + 3 and h < Config.World.WORLD_HEIGHT - 3 then
+                        if ctx.world:getGroundHeight(x + 1, z) == h
+                            and ctx.world:getGroundHeight(x, z + 1) == h
+                            and ctx.world:getGroundHeight(x + 1, z + 1) == h then
+                            px, pz, gh = x, z, h
+                            break
+                        end
+                    end
+                end
+            end
         end
+        if px then break end
     end
     if not px or not pz or not gh then
         V.fail("找不到合适的测试地面")

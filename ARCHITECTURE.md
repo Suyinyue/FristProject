@@ -9,7 +9,7 @@
 > - `Design.md`：玩法需求（体素世界、血条、生物生成、**AI 机制**、物品、**建筑/防御塔**）
 > - `engine-docs/`、`examples/`、`urhox-libs/`、`.emmylua/`：引擎 API 与示例（以这些为准，不要凭 Urho3D 记忆写代码）
 
-最后更新：2026-11-21（物品系统、防御塔、炸弹人自爆、出生点预置塔已完成）
+最后更新：2026-11-21（物品系统、防御塔、炸弹人自爆、出生点预置塔、生物 AI 已完成）
 
 ---
 
@@ -109,10 +109,14 @@ scripts/
 │   ├── FirstPersonArm.lua  第一人称手臂与手持方块
 │   └── PlayerBody.lua      第三人称身体
 ├── entity/
-│   ├── Mob.lua             生物 AI、血量、朝向、飞行/悬浮、爆炸触发
+│   ├── Mob.lua             生物实体：血量、朝向、飞行/悬浮、剔除；AI 委托给 ai/
 │   ├── MobManager.lua      生成机制、死亡掉落、自爆结算
 │   ├── MobModel.lua        多部件方块模型（biped/bomber/ghost/quadruped/bird）
-│   └── HealthBar.lua       生物头顶血条（朝向玩家）
+│   ├── HealthBar.lua       生物头顶血条（朝向玩家）
+│   └── ai/
+│       ├── AIController.lua   AI 总控：状态机 + 游走/检测/追踪/攻击
+│       ├── AIStateMachine.lua 状态机（IDLE/WANDERING/CHASING/ATTACKING）
+│       └── Pathfinding.lua    方块级 A* 寻路 + 视线检测
 ├── ui/
 │   ├── UIManager.lua       根 UI：准星、血条、饥饿、时间、背包按钮、Hotbar
 │   ├── Hotbar.lua          9 格快捷栏（物品系统）
@@ -340,7 +344,7 @@ Blocks:getColor(id) / getDisplayName(id) / getPlaceableBlocks()
 
 > 弓箭手当前是「在 8 格内直接造成 100 攻击力伤害」，没有箭矢投射物；玩家弓才有 `ProjectileManager` 箭矢。
 
-> ⚠️ **与最新 Design.md 的差距**：`Design.md` 的「AI机制」新增了完整要求（AIController / 状态机 IDLE→WANDERING→CHASING→ATTACKING、A* 寻路与避障、视线检测、目标保持、攻击间隔 1.5s、近战距离 1.5 格等）。当前实现是简化版：中立生物在出生点附近随机漫游，敌对生物直线追击并在攻击距离内直接结算伤害，**没有状态机、A* 寻路、视线遮挡检测和目标保持**。详见 §14.1。
+> AI 已按 `Design.md`「AI机制」实现：`entity/ai/` 提供通用状态机（IDLE→WANDERING→CHASING→ATTACKING）、方块级 A* 寻路、视线检测与目标保持，参数集中在 `GameConfig.MobAI`。详见 §6.3、§14.1。
 
 ### 6.2 生成机制（MobManager，按 Design.md）
 
@@ -357,16 +361,16 @@ Blocks:getColor(id) / getDisplayName(id) / getPlaceableBlocks()
 9. 新加载区块额外执行一次「原生动物」生成（35% 概率，太远的区块跳过）。
 10. 开局 `spawnInitial` 只生成中立动物（避免出生即被围殴）。
 
-### 6.3 Mob AI 与表现
+### 6.3 Mob AI 与表现（entity/ai/）
 
-- 敌对：`distXZ <= AGGRO_RANGE=20` 追击；进入 `range*BLOCK_SIZE` 后攻击（冷却 1s）。
-- 中立：在出生点 `homeRadius=6` 内随机漫游。
-- **朝向 = 本帧移动方向**（`math.atan(moveX, moveZ)`）；追到玩家身边后停下并面向玩家。
-- 飞行：幽灵 `fly=true` 悬停在玩家高度 +0.6；炸弹人已改为纯行走。
-- 地面定位：每 0.25s 轮询 `world:getGroundHeight`，平滑贴地/下降。
-- 渲染剔除：距玩家 > `RENDER_CULL_DISTANCE=72` 整体 `SetDeepEnabled(false)`。
-- 模型：`MobModel` 按种类拼装多个方块部件；材质按颜色缓存共享。
-- 血条：`HealthBar` 挂在头顶，宽度随体型，始终朝向玩家。
+AI 由 `entity/ai/` 的通用框架驱动（参数集中在 `GameConfig.MobAI`），不针对单一生物硬编码：
+
+- **状态机**：`IDLE`（待机）→ `WANDERING`（随机游走）→ `CHASING`（追踪）→ `ATTACKING`（攻击）。敌对生物在 IDLE/WANDERING 期间持续检测目标，发现即转入 CHASING；中立生物只在 IDLE/WANDERING 之间循环。
+- **目标检测**：`DETECT_RANGE=16` 格内且视线通畅（`REQUIRE_LOS`，隔墙不发现）才锁定；目标超出 `LOSE_RANGE=24` 格、死亡，或长时间不可见/不可达（`LOSE_TIME=10s`）则放弃，避免在检测边缘来回切换。
+- **寻路**：地面生物走方块级 A*（`Pathfinding.lua`，支持绕障、登高 1 格、有限下落 ≤3 格、不穿墙不进液体）；路径按「目标移动超阈值 / 到重算间隔 / 路径走完」才重算。飞行生物（幽灵）直线追击。
+- **近战攻击**：进入 `ATTACK_RANGE=1.5` 格后站定面向目标，`ATTACK_INTERVAL=1.5s` 冷却后走玩家伤害系统；远程（弓箭手）与自爆（炸弹人）沿用各自 `def.range` 与 `def.explodes`。
+- **性能**：重决策（检测/状态切换/重算路径）按 `TICK_INTERVAL=0.2s` 节流，逐帧只做沿路径移动；超过 `RENDER_CULL_DISTANCE=72` 的生物跳过 AI 更新。
+- 其它表现不变：朝向 = 移动方向（攻击时面向目标）、幽灵悬浮 `player.y+0.6`、每 0.25s 贴地、`MobModel` 拼装模型、`HealthBar` 朝向玩家。
 
 ### 6.4 炸弹人自爆（BOMBER）
 
@@ -728,6 +732,12 @@ npx -y @taptap/maker preview validate --mode both \
   --target-dir "E:/Work/Game/taptap/FristPorject" \
   --validate-frames 1500 --validate-timeout 150 \
   --validate-test devtools/BomberCheck.lua --screenshot-frame 1160 --json
+
+# 生物 AI：9 条断言
+npx -y @taptap/maker preview validate --mode validate \
+  --target-dir "E:/Work/Game/taptap/FristPorject" \
+  --validate-frames 1600 --validate-timeout 170 \
+  --validate-test devtools/MobAiCheck.lua --json
 ```
 
 ### 12.3 验收脚本覆盖
@@ -737,6 +747,7 @@ npx -y @taptap/maker preview validate --mode both \
 | `ItemUiCheck.lua` | E 打开/关闭背包、初始装备、创造页取原木 → 2×2 合成 4 木板 → 放入背包、Q 丢弃后快捷栏清空 |
 | `TowerCheck.lua` | 出生点预置塔存在、2 层塔范围 6、同基座 2 火焰石只激活 1 个、塔击杀僵尸、2 块基座不成塔、破坏顶层后失效 |
 | `BomberCheck.lua` | 玩家受到自爆伤害、2 格内僵尸受伤、2 格内方块被清除、炸弹人死亡 |
+| `MobAiCheck.lua` | 中立生物不追击、检测范围外僵尸不追击、检测范围内僵尸进入追击、近身僵尸攻击掉血（状态机 + 检测 + 攻击接线） |
 
 ### 12.4 已知噪音
 
@@ -755,7 +766,9 @@ npx -y @taptap/maker preview validate --mode both \
 | 调移动/跳跃/重力 | `GameConfig.Player` + `player/PlayerController.lua` |
 | 调伤害/血量/护甲 | `GameConfig.Player`、`Player:getArmor/getAttack/takeDamage` |
 | 调生物数值/生成规则 | `GameConfig.Mobs` / `GameConfig.MobSpawning` |
-| 改生物 AI/朝向/飞行 | `entity/Mob.lua` |
+| 改生物 AI（状态机/寻路/检测/攻击） | `entity/ai/AIController.lua`、`entity/ai/Pathfinding.lua`、`entity/ai/AIStateMachine.lua` |
+| 调生物 AI 数值 | `GameConfig.MobAI` |
+| 改生物朝向/飞行/剔除/贴地 | `entity/Mob.lua` |
 | 改炸弹人自爆 | `GameConfig.Mobs.BOMBER` + `entity/Mob.lua` 攻击分支 + `MobManager:explodeMob` |
 | 加方块 | `rendering/texturepacks/AtlasLayout.lua` → 两个 Pack → `data/BlockRegistry.lua` |
 | 加物品 | `data/ItemDefinitions.lua`（方块物品自动生成） |
@@ -789,27 +802,26 @@ npx -y @taptap/maker preview validate --mode both \
 11. **背包面板固定 800×500**，极窄屏幕上可能偏大；UI 缩放依赖 `UI.Scale.DEFAULT`。
 12. **合成「使用时间/动画」**只有挥臂，没有按物品区分的读条时间。
 
-### 14.1 生物 AI 待实现（Design.md「AI机制」新增）
+### 14.1 生物 AI（已实现，Design.md「AI机制」）
 
-Design.md 新增了一套完整的 Minecraft 风格生物 AI 需求，当前代码**尚未实现**。现状与目标的差距：
+`entity/ai/` 已实现通用状态机 + A* 寻路 + 视线检测，`Mob:update` 委托给 `AIController`。已落地：
 
-| 需求（Design.md） | 当前实现 |
-|---|---|
-| AIController / AIStateMachine / Behavior 模块 | 全部写在 `Mob:update` 的 if/else 中，没有状态机模块 |
-| IDLE / WANDERING / CHASING / ATTACKING 状态 | 只有「漫游 / 追击」两个隐式分支 |
-| 随机游走半径 10 格、最短 3 格、间隔 2~6 秒、地形合法性检查 | 出生点 `homeRadius=6` 随机方向，2~5 秒换向，无目标点合法性检查 |
-| A* / NavigationSystem 寻路、绕障、台阶 | **没有寻路**：直线朝玩家移动，碰撞靠地形高度贴合，遇墙会卡住 |
-| 16 格检测、视线遮挡检测、最近目标、目标保持 | 20 格索敌（`AGGRO_RANGE`），无视线检测、无目标保持/丢失计时 |
-| 攻击距离 1.5 格、间隔 1.5 秒、伤害 3 | 用每个生物的 `range/attack` 配置，间隔固定 1 秒 |
-| AI 更新频率与渲染帧率分离 | 每帧更新所有生物 |
-| 性能：空间分区查询附近实体 | 遍历 `mobManager.mobs`（数量上限 32，暂未出问题） |
-| 普通生物不进入墙壁/危险地形 | 漫游只限制出生点距离，不做目标点碰撞预检 |
+- 状态机 IDLE / WANDERING / CHASING / ATTACKING（`AIStateMachine`）
+- 随机游走（半径 10 格、最短 3 格、间隔 2~6 秒、目标点合法性校验）
+- 方块级 A*（绕障、登高 1 格、有限下落、不穿墙不进液体），路径缓存 / 按需重算
+- 16 格检测 + 视线遮挡 + 目标保持/丢失
+- 近战 1.5 格 / 1.5s 攻击间隔；远程与自爆沿用各自配置
+- AI 重决策按 0.2s 节流，与渲染帧解耦
 
-如果下一步实现 AI，建议：
-1. 新建 `entity/ai/`：`AIController`、`AIStateMachine`、`WanderBehavior`、`TargetDetection`、`PathFollow`、`MeleeAttack`。
-2. 在 `World` 上实现方块级 A*（按生物碰撞体尺寸检查 1~3 格净空、台阶高度），路径节点缓存，按目标移动/受阻才重算。
-3. `Mob:update` 改为委托给 `AIController:update(dt)`，保留现有朝向/动画/地面贴合代码。
-4. 用 `devtools` 增加 AI 验收脚本（状态切换、绕墙、攻击间隔）。
+仍存在的取舍/限制：
+
+1. **伤害数值沿用攻击力/护甲模型**（僵尸攻击 100/护甲 10 → 实际 10 伤害），未采用 AI 需求里的「单次 3 点」示例值（Design.md 两处互相矛盾，见下）。
+2. **无空间分区**：附近实体仍遍历 `mobManager.mobs`（上限 32，暂未成瓶颈）。
+3. **飞行生物（幽灵）直线追击**，不做 A*，可能穿过地形——幽灵「飞行/穿墙」表现的有意简化。
+4. **生物不跳跃**，仅登高 1 格；2 格以上高台无法攀登（与 MC 僵尸行为一致）。
+5. **多玩家目标选择**未实现（单机只有一个玩家，检测直接取传入的 player）。
+
+> Design.md「AI机制」§六写「单次伤害 3 点」，§四的僵尸表写「攻击力 100 / 护甲 10」（按公式 = 10 伤害），两者冲突。实现遵循后者（沿用既有伤害系统与生物表）；如需改成 3 点，把僵尸 `attack` 调为 30 即可。
 
 ### 14.2 防御塔待实现/待对齐（Design.md 最新版）
 
@@ -839,10 +851,11 @@ Design.md 新增了一套完整的 Minecraft 风格生物 AI 需求，当前代�
 - 无限地形流式加载 + 光照 BFS 范围修复，解决加载/行走卡顿
 - 生物多部件模型、朝向 = 移动方向、血条朝向玩家
 - 完整生物生成机制（区块候选、环境筛选、权重、群体、上限、消失、新区块原生生成）
+- 生物 AI：`entity/ai/` 状态机 + 方块级 A* 寻路 + 视线检测 + 目标保持，重决策与渲染帧解耦
 - 完整物品系统（定义/实例/背包/掉落/使用/耐久/合成/UI/存档）
 - 防御塔建筑系统 + 出生点预置塔
 - 炸弹人改为 300/10/30、行走、攻击自爆（范围伤害 + 清方块 + 自爆死亡）
-- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck
+- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck
 - Git Stop Hook 自动提交/推送（github/dev）
 
 ---

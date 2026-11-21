@@ -11,6 +11,7 @@
 local Config = require("config.GameConfig")
 local HealthBar = require("entity.HealthBar")
 local MobModel = require("entity.MobModel")
+local AIController = require("entity.ai.AIController")
 
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
 
@@ -30,13 +31,9 @@ local BLOCK_SIZE = Config.World.BLOCK_SIZE
 ---@field dead boolean
 ---@field model MobModel
 ---@field healthBar HealthBar
----@field attackCooldown number
----@field wanderDirX number
----@field wanderDirZ number
----@field wanderTimer number
+---@field ai AIController
 ---@field homeX number
 ---@field homeZ number
----@field homeRadius number
 ---@field groundY number
 ---@field groundTimer number
 ---@field cullTimer number
@@ -72,18 +69,15 @@ function Mob.new(scene, world, mobType, spawnPos)
     self.fly = def.fly
     self.dead = false
 
-    -- AI 状态
-    self.attackCooldown = 0.0
-    self.wanderDirX = 0.0
-    self.wanderDirZ = 0.0
-    self.wanderTimer = 0.0
     self.homeX = spawnPos.x
     self.homeZ = spawnPos.z
-    self.homeRadius = 6.0
     self.moving = false
     self.airborne = false
     self.yaw = 0.0
     self.onExplode = nil
+
+    -- AI 控制器（状态机 + 游走/检测/追踪/攻击）
+    self.ai = AIController.new(self, world, def)
 
     -- 性能缓存
     self.groundY = spawnPos.y
@@ -167,39 +161,6 @@ function Mob:refreshGroundY(dt)
     end
 end
 
----中立生物：在出生点附近漫游
----@param dt number 时间步长
----@return number moveX, number moveZ 本帧移动方向（用于设置朝向）
-function Mob:wander(dt)
-    self.wanderTimer = self.wanderTimer - dt
-    if self.wanderTimer <= 0 then
-        self.wanderTimer = 2.0 + math.random() * 3.0
-        local angle = math.random() * 2 * math.pi
-        self.wanderDirX = math.cos(angle)
-        self.wanderDirZ = math.sin(angle)
-    end
-
-    local speed = self.def.speed
-    local mp = self.node.position
-    local nx = mp.x + self.wanderDirX * speed * dt
-    local nz = mp.z + self.wanderDirZ * speed * dt
-
-    -- 限制在出生点附近，避免走进未生成区域
-    local hx = nx - self.homeX
-    local hz = nz - self.homeZ
-    local dist = math.sqrt(hx * hx + hz * hz)
-    if dist > self.homeRadius then
-        self.wanderDirX = -hx / dist
-        self.wanderDirZ = -hz / dist
-        nx = mp.x + self.wanderDirX * speed * dt
-        nz = mp.z + self.wanderDirZ * speed * dt
-    end
-
-    self.node.position = Vector3(nx, mp.y, nz)
-    self.moving = true
-    return self.wanderDirX, self.wanderDirZ
-end
-
 ---距离剔除：远处生物整体禁用节点
 ---@param dt number
 ---@param playerPos Vector3
@@ -233,52 +194,36 @@ function Mob:update(dt, player)
 
     local pp = player:getPosition()
     self:updateCulling(dt, pp)
-
-    local mp = self.node.position
-    local dx = pp.x - mp.x
-    local dz = pp.z - mp.z
-    local distXZ = math.sqrt(dx * dx + dz * dz)
+    if self.culled then
+        return
+    end
 
     self.moving = false
 
-    -- 朝向与移动方向一致：记录本帧的移动方向，最后统一设置朝向
-    local moveX, moveZ = 0.0, 0.0
+    -- AI 决策 + 移动方向（faceX/faceZ 用于静止时面向目标）
+    local moveX, moveZ, faceX, faceZ = self.ai:update(dt, player)
 
-    local aggroRange = Config.MobSpawning.AGGRO_RANGE
-    if self.hostile and distXZ <= aggroRange then
-        -- 敌对且进入索敌范围：追玩家，进攻击距离就攻击
-        local attackRangeWorld = self.def.range * BLOCK_SIZE
-        if distXZ > attackRangeWorld and distXZ > 0.0001 then
+    local moveDx, moveDz = 0.0, 0.0
+    if moveX ~= 0 or moveZ ~= 0 then
+        local len = math.sqrt(moveX * moveX + moveZ * moveZ)
+        if len > 0.0001 then
             local speed = self.def.speed
-            local nx = mp.x + (dx / distXZ) * speed * dt
-            local nz = mp.z + (dz / distXZ) * speed * dt
+            local mp = self.node.position
+            local nx = mp.x + (moveX / len) * speed * dt
+            local nz = mp.z + (moveZ / len) * speed * dt
             self.node.position = Vector3(nx, mp.y, nz)
             self.moving = true
-            moveX, moveZ = dx, dz
-        else
-            -- 已在攻击距离内：站定并面向玩家
-            moveX, moveZ = dx, dz
+            moveDx, moveDz = moveX, moveZ
         end
-
-        if distXZ <= attackRangeWorld and self.attackCooldown <= 0 then
-            if self.def.explodes and self.onExplode then
-                -- 炸弹人：进入攻击距离立即自爆（由 MobManager 结算范围伤害/清方块/自身死亡）
-                self.onExplode(self, player)
-                return
-            end
-            if not player:isDead() then
-                player:takeDamage(self.attack)
-            end
-            self.attackCooldown = 1.0
-        end
-    else
-        -- 中立生物 / 未索敌的敌对生物：漫游
-        moveX, moveZ = self:wander(dt)
     end
 
-    -- 统一设置朝向：与移动方向一致
-    if (moveX ~= 0 or moveZ ~= 0) then
-        local yaw = math.deg(math.atan(moveX, moveZ))
+    -- 朝向：优先用 face 方向（攻击时静止面向目标），否则用移动方向
+    local fy, fz = faceX, faceZ
+    if fy == 0 and fz == 0 then
+        fy, fz = moveDx, moveDz
+    end
+    if fy ~= 0 or fz ~= 0 then
+        local yaw = math.deg(math.atan(fy, fz))
         self.yaw = yaw
         self.node.rotation = Quaternion(0, yaw, 0)
     end
@@ -320,13 +265,10 @@ function Mob:update(dt, player)
 
     -- 血条朝向玩家：抵消身体自身朝向，让血条正面始终对着玩家
     if self.healthBar then
-        local yawToPlayer = math.deg(math.atan(dx, dz))
+        local pdx = pp.x - self.node.position.x
+        local pdz = pp.z - self.node.position.z
+        local yawToPlayer = math.deg(math.atan(pdx, pdz))
         self.healthBar:setYaw(yawToPlayer - self.yaw)
-    end
-
-    -- 攻击冷却
-    if self.attackCooldown > 0 then
-        self.attackCooldown = self.attackCooldown - dt
     end
 end
 

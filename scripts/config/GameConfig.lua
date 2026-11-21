@@ -100,8 +100,43 @@ GameConfig.MobSpawning = {
 
     DESPAWN_DISTANCE = 220.0,    -- 超过该距离（世界单位）的生物自然消失（须大于最远生成距离）
     SPAWN_GRACE = 3.0,           -- 出生/重生后的无敌时间（秒）
-    RENDER_CULL_DISTANCE = 72.0, -- 超过该距离生物节点整体禁用（省渲染开销）
-    AGGRO_RANGE = 20.0           -- 敌对生物索敌距离（世界单位）
+    RENDER_CULL_DISTANCE = 72.0  -- 超过该距离生物节点整体禁用（省渲染开销）
+}
+
+-- ============================================
+-- 生物 AI 配置（Design.md「AI机制」）
+-- 状态机：IDLE → WANDERING → CHASING → ATTACKING；索敌/追踪/近战参数集中在这里
+-- 单位说明：带 _RANGE / _DIST / _RADIUS / _FALL 的都是「格」，运行时乘 BLOCK_SIZE 换算世界单位
+-- ============================================
+GameConfig.MobAI = {
+    TICK_INTERVAL = 0.2,         -- AI 重决策间隔（秒），与渲染帧解耦
+
+    -- 随机游走（中立生物 + 未索敌的敌对生物）
+    WANDER_RADIUS = 10.0,        -- 游走半径（格）
+    WANDER_MIN_DIST = 3.0,       -- 最短游走距离（格）
+    WANDER_WAIT_MIN = 2.0,       -- 两次游走间等待最短（秒）
+    WANDER_WAIT_MAX = 6.0,       -- 两次游走间等待最长（秒）
+    WANDER_TRY = 8,              -- 每次挑选游走目标点的尝试次数
+
+    -- 目标检测
+    DETECT_RANGE = 16.0,         -- 检测半径（格）
+    REQUIRE_LOS = true,          -- 需要视线（隔墙不发现）
+    LOS_STEP = 0.4,              -- 视线检测采样步长（格）
+
+    -- 目标保持与丢失
+    LOSE_RANGE = 24.0,           -- 目标超过该距离（格）判定丢失
+    LOSE_TIME = 10.0,            -- 长时间不可见 / 无法接近判定丢失（秒）
+
+    -- 追踪 / 寻路
+    REPATH_INTERVAL = 0.5,       -- 重算路径间隔（秒）
+    REPATH_DIST = 2.0,           -- 目标移动超过该距离（格）才重算
+    PATH_MAX_NODES = 256,        -- A* 搜索节点预算
+    MAX_FALL = 3,                -- 允许下落的最大高度（格）
+    STEP_HEIGHT = 1,             -- 允许登上的台阶高度（格）
+
+    -- 近战攻击
+    ATTACK_RANGE = 1.5,          -- 近战攻击距离（格）
+    ATTACK_INTERVAL = 1.5,       -- 攻击间隔（秒）
 }
 
 -- ============================================
