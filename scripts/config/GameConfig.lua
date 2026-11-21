@@ -1,0 +1,198 @@
+-- ====================================================================
+-- config/GameConfig.lua
+-- 游戏配置模块 - 集中管理所有常量
+-- ====================================================================
+
+local GameConfig = {}
+
+-- ============================================
+-- 世界大小预设 (修改这里切换世界大小)
+-- ============================================
+local WORLD_SIZE_PRESET = "medium" -- 可选: "tiny", "small", "medium", "large", "huge"
+
+local WorldSizePresets = {
+    tiny   = { distance = 2, height = 64 },   -- 64×64,   25 区块  (测试用)
+    small  = { distance = 4, height = 64 },   -- 128×128, 81 区块  (轻量)
+    medium = { distance = 6, height = 80 },   -- 192×192, 169 区块 (推荐)
+    large  = { distance = 8, height = 96 },   -- 256×256, 289 区块 (较大)
+    -- 不推荐更大的地图了， 再大内存会超过1G，在网页和手机上会很危险了
+}
+
+local preset = WorldSizePresets[WORLD_SIZE_PRESET] or WorldSizePresets.medium
+
+-- 世界设置
+GameConfig.World = {
+    CHUNK_SIZE = 16,                      -- 区块宽度/深度（方块数）
+    WORLD_HEIGHT = preset.height,         -- 世界高度（方块数）
+    RENDER_DISTANCE = preset.distance,    -- 各方向渲染区块数
+    BLOCK_SIZE = 2.0,                     -- 方块世界单位大小
+    WATER_LEVEL = math.floor(preset.height * 0.47),  -- 水平面高度（约47%高度）
+    MAX_CHUNK_REBUILDS_PER_FRAME = 1      -- 每帧最大区块重建数（避免挖地卡顿）
+}
+
+-- 玩家设置
+GameConfig.Player = {
+    HEIGHT = 1.8,                 -- 玩家高度（方块数）
+    SPEED = 8.0,                  -- 移动速度
+    FLY_SPEED = 16.0,             -- 飞行速度
+    FLY_VERTICAL_SPEED = 12.0,    -- 飞行上下速度
+    JUMP_SPEED = 12.0,            -- 跳跃速度
+    GRAVITY = -25.0,              -- 重力加速度
+    REACH_DISTANCE = 10.0,        -- 方块交互距离
+    COLLISION_RADIUS = 0.3,       -- 碰撞半径
+
+    -- 战斗属性（Design.md：伤害 = 攻击力 / 护甲）
+    HEALTH = 100.0,               -- 血量
+    ARMOR = 10.0,                 -- 护甲
+    ATTACK = 100.0,               -- 攻击力
+    ATTACK_RANGE = 6.0,           -- 近战攻击距离（世界单位）
+    ATTACK_COOLDOWN = 0.4,        -- 攻击冷却（秒）
+    DEATH_RESPAWN_DELAY = 2.0     -- 死亡后重生延迟（秒）
+}
+
+-- ============================================
+-- 生物配置（Design.md）
+-- 敌对生物：会主动攻击玩家；中立生物：不会攻击
+-- 伤害公式：伤害 = 攻击力 / 目标护甲
+-- ============================================
+-- 生物定义
+-- spawnTime: "night" 只夜间生成 / "any" 日夜都生成
+-- category:  "monster" 敌对怪物 / "animal" 陆地动物（各自有独立数量上限）
+-- weight:    生成权重（越高越容易被抽中）
+-- group:     {最小, 最大} 每次生成成群出现的数量
+-- biomes:    允许生成的生物群系（"plains"/"forest"/"desert"/"mountains"；不填=不限）
+-- ground:    允许的地面类型（"grass"/"sand"/"dirt"/"stone"/"snow"/"any"）
+GameConfig.Mobs = {
+    -- 敌对生物
+    ZOMBIE  = { name = "僵尸",   hostile = true,  attack = 100, armor = 10, health = 100, ranged = false, fly = false, speed = 3.0, range = 2.0, spawnTime = "night", category = "monster", weight = 10, group = {1, 3}, biomes = {"plains", "forest", "desert"}, ground = {"grass", "dirt", "sand", "stone", "snow"}, color = {0.35, 0.55, 0.25}, size = {0.8, 1.8, 0.6} },
+    GHOST   = { name = "幽灵",   hostile = true,  attack = 50,  armor = 10, health = 50,  ranged = false, fly = true,  speed = 4.0, range = 2.0, spawnTime = "night", category = "monster", weight = 5,  group = {1, 2}, biomes = {"plains", "forest", "desert"}, ground = {"any"}, color = {0.82, 0.82, 0.95}, size = {0.8, 1.6, 0.6} },
+    -- 炸弹人：Design.md「近战攻击，可以飞行」「行动：行走」
+    -- 平时步行走路，玩家在高处/空中时起飞追击（canFly = true）
+    BOMBER  = { name = "炸弹人", hostile = true,  attack = 200, armor = 10, health = 50,  ranged = false, fly = false, canFly = true, flySpeed = 4.5, speed = 3.5, range = 2.0, spawnTime = "any",   category = "monster", weight = 4,  group = {1, 2}, biomes = {"plains", "forest", "desert"}, ground = {"grass", "dirt", "sand", "stone"}, color = {0.20, 0.20, 0.24}, size = {0.9, 1.6, 0.9} },
+    ARCHER  = { name = "弓箭手", hostile = true,  attack = 100, armor = 10, health = 50,  ranged = true,  fly = false, speed = 3.0, range = 8.0, spawnTime = "any",   category = "monster", weight = 4,  group = {1, 2}, biomes = {"plains", "forest"}, ground = {"grass", "dirt", "stone"}, color = {0.55, 0.35, 0.20}, size = {0.8, 1.7, 0.6} },
+
+    -- 中立生物
+    COW     = { name = "牛",     hostile = false, attack = 0,   armor = 10, health = 100, ranged = false, fly = false, speed = 1.5, range = 0.0, spawnTime = "any", category = "animal", weight = 6, group = {2, 4}, biomes = {"plains", "forest"}, ground = {"grass"}, color = {0.92, 0.92, 0.92}, size = {1.1, 1.2, 0.9} },
+    SHEEP   = { name = "羊",     hostile = false, attack = 0,   armor = 10, health = 80,  ranged = false, fly = false, speed = 1.5, range = 0.0, spawnTime = "any", category = "animal", weight = 8, group = {2, 4}, biomes = {"plains", "forest", "mountains"}, ground = {"grass", "snow"}, color = {0.95, 0.95, 0.95}, size = {1.0, 1.1, 0.8} },
+    PIG     = { name = "猪",     hostile = false, attack = 0,   armor = 10, health = 50,  ranged = false, fly = false, speed = 1.5, range = 0.0, spawnTime = "any", category = "animal", weight = 6, group = {2, 3}, biomes = {"plains", "forest"}, ground = {"grass"}, color = {0.96, 0.70, 0.75}, size = {0.9, 0.9, 0.9} },
+    CHICKEN = { name = "鸡",     hostile = false, attack = 0,   armor = 10, health = 30,  ranged = false, fly = false, speed = 1.5, range = 0.0, spawnTime = "any", category = "animal", weight = 8, group = {2, 4}, biomes = {"plains", "forest", "desert"}, ground = {"grass", "sand"}, color = {0.96, 0.90, 0.70}, size = {0.5, 0.7, 0.4} },
+}
+
+-- 生物生成配置（Design.md：以区块为单位、以玩家为范围、环境决定种类、权重决定概率）
+GameConfig.MobSpawning = {
+    INITIAL_COUNT = 4,           -- 开局生成任务次数（每次成群 1~4 只）
+    INITIAL_NEUTRAL_ONLY = true, -- 开局不刷敌对生物，避免出生即被围殴
+
+    SPAWN_INTERVAL = 2.5,        -- 生成任务间隔（秒）
+    MIN_CHUNK_DIST = 2,          -- 候选区块距玩家最近区块数（过近排除）
+    MAX_CHUNK_DIST = 4,          -- 候选区块距玩家最远区块数（过远排除）
+    MIN_DISTANCE = 12.0,         -- 距玩家小于该距离（方块）的格子禁止生成
+    GROUP_RADIUS = 4.0,          -- 群体生成时的散布半径（方块）
+    GROUP_ATTEMPTS = 10,         -- 每只生物最多尝试的位置数
+
+    -- 分类数量上限（达到上限时暂停该类别自然生成）
+    CATEGORY_CAPS = {
+        monster = 12,            -- 敌对怪物
+        animal = 16,             -- 陆地动物
+    },
+    MAX_MOBS = 32,               -- 绝对总数上限（性能兜底）
+
+    DESPAWN_DISTANCE = 220.0,    -- 超过该距离（世界单位）的生物自然消失（须大于最远生成距离）
+    SPAWN_GRACE = 3.0,           -- 出生/重生后的无敌时间（秒）
+    RENDER_CULL_DISTANCE = 72.0, -- 超过该距离生物节点整体禁用（省渲染开销）
+    AGGRO_RANGE = 20.0           -- 敌对生物索敌距离（世界单位）
+}
+
+-- ============================================
+-- 区块流式加载配置（无限地形）
+-- ============================================
+GameConfig.Streaming = {
+    -- 性能预算：按「时间」而不是「个数」限量，避免单个区块耗时突增时卡一帧
+    GEN_BUDGET_MS = 3.0,         -- 每帧最多花多少毫秒生成地形数据
+    BUILD_BUDGET_MS = 4.0,       -- 每帧最多花多少毫秒推进网格构建
+    BUILD_MAX_INFLIGHT = 4,      -- 同时在构建管线里的区块数
+    UNLOAD_PADDING = 2,          -- 超出渲染距离多少格后卸载网格
+    INITIAL_CHUNKS_PER_FRAME = 3, -- 初始加载每帧生成区块数
+    INITIAL_RADIUS = 3           -- 初始加载半径（区块数），其余由流式加载补齐
+}
+
+-- 控制设置
+GameConfig.Controls = {
+    MOUSE_SENSITIVITY = 0.1,          -- 鼠标灵敏度
+    TOUCH_LOOK_SENSITIVITY = 0.15,    -- 触摸视角灵敏度
+    TOUCH_TAP_MAX_DISTANCE = 10,      -- Tap 判定最大移动距离（设计像素）
+    TOUCH_TAP_MAX_DURATION = 300,     -- Tap 判定最大时长（毫秒）
+}
+
+-- 粒子效果设置
+GameConfig.Particles = {
+    GRAVITY = -20.0,              -- 粒子重力
+    LIFETIME = 1.5,               -- 粒子生命周期（秒）
+    COUNT_MIN = 8,                -- 最小粒子数
+    COUNT_MAX = 12                -- 最大粒子数
+}
+
+-- 纹理图集设置
+GameConfig.Texture = {
+    ATLAS_SIZE = 16,              -- 图集大小（16x16格）
+    TILE_SIZE = 1.0 / 16          -- 每格UV大小
+}
+
+-- 噪声生成设置
+GameConfig.Noise = {
+    SEED = 12345                  -- 世界生成种子
+}
+
+-- 相机设置
+GameConfig.Camera = {
+    FAR_CLIP = 500.0,             -- 远裁剪面
+    FOV = 90.0,                   -- 视野角度
+    FOG_START = 50.0,             -- 雾效起始距离
+    FOG_END = 300.0,              -- 雾效结束距离
+    -- 第三人称相机设置
+    THIRD_PERSON_DISTANCE = 4.0,  -- 第三人称相机距离（方块数）
+    THIRD_PERSON_HEIGHT = 0.8,    -- 第三人称相机高度偏移（相机比眼睛高1.5方块，角色在屏幕下方）
+    THIRD_PERSON_COLLISION = true -- 第三人称相机碰撞检测
+}
+
+-- 昼夜循环设置
+-- 生物生成规则依赖昼夜（Design.md：僵尸/幽灵夜间生成），必须开启
+GameConfig.DayNight = {
+    ENABLED = true,               -- 是否启用昼夜循环
+    DAY_DURATION = 480,           -- 1 游戏天 = 480 真实秒 (8分钟)
+    START_TIME = 6.2,             -- 游戏开始时间 (清晨)
+    TIME_SCALE = 1.0,             -- 时间流速倍率 (1.0 = 正常)
+}
+
+-- ============================================
+-- 功能开关（渐进式功能，让 AI 帮你实现！）
+-- ============================================
+-- 提示：这些功能的代码框架已搭好，但实现是 TODO
+-- 打开开关后，告诉 AI "帮我实现树木生成" 即可！
+-- 
+GameConfig.Features = {
+    -- 世界装饰（需要 AI 实现 WorldGenerator.lua 中的 TODO）
+    GENERATE_TREES = false,       -- 树木生成 → tryPlaceTree()
+    GENERATE_VEGETATION = false,  -- 花草生成 → tryPlaceVegetation()
+    SPAWN_HOUSE = false,          -- 出生小屋 → self.house:generateAtSpawn()
+
+    -- ⚠️ 下面这个不是 TODO，是**已实现**的功能，默认开启
+    -- 地质特征：基岩地板 / 按深度分布的矿脉 / 砂砾团 / 黏土 / 高山雪线 / 深层岩浆池
+    -- 关掉它世界会退回"只有石头土沙草水"的形态（新方块仍可手动放置）
+    RICH_TERRAIN = true,
+}
+
+-- 地质特征参数（Features.RICH_TERRAIN = true 时生效）
+GameConfig.Terrain = {
+    SNOW_LINE_RATIO = 0.70,   -- 超过 WORLD_HEIGHT * 此比例的山顶开始积雪
+    SNOW_BLOCK_EXTRA = 6,     -- 再高这么多格，顶层直接是雪块
+    FEATURE_CELL = 8,          -- 地质特征的空间格大小（每格最多投放一条矿脉）
+}
+
+-- 视觉效果设置
+GameConfig.Effects = {
+    -- 窒息盒子：相机穿入固体方块时显示方块内部视图（穿墙保护）
+    SUFFOCATION_BOX_ENABLED = false,
+}
+
+return GameConfig
