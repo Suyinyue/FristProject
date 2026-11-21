@@ -970,3 +970,449 @@ DefenseTowerConfig：
 先给出实现方案，然后直接修改项目代码，完成编译和测试。
 
 不要只提供伪代码或空接口，必须实现可以在游戏中实际运行的功能。
+
+---
+
+# 附：Minecraft 未实现功能（本轮新增需求，待开发）
+
+> 以下功能是「我的世界」里有、但当前工程尚未实现的内容。实现逻辑全部按现有代码约定书写：
+> 方块 ID 从 **72** 顺延（0–71 已占用，禁止重排）；方块物品自动生成 `block:<id>`；物品 ID 用字符串；
+> 配置集中到 `config/GameConfig.lua`；方块实体数据用「坐标 → 数据」的旁路表（参照 `building/TowerManager.lua`），
+> 因为 `World` 只存方块/光照/状态，不存方块实体（箱子内容、熔炉进度等）。
+>
+> 这些系统都接入 `Standalone.HandleUpdate`（单机主循环）与 `OnWorldReady`（初始化），不碰多人脚手架。
+
+## 一、熔炉与烧炼系统（Furnace & Smelting）
+
+**现状缺口**：`FURNACE`（方块 ID 23）已注册且有贴图，但右键无行为；矿石（煤/铁/金/钻石/红石/青金石/铜/绿宝石）只能当方块挖走，无法烧成锭/宝石；生肉无法烤熟。这是当前物品链最大的断点（铁锭、金锭只能靠初始装备和刷怪掉落获取）。
+
+### 1.1 数据与配置
+
+在 `GameConfig` 增加：
+
+```lua
+GameConfig.Furnace = {
+    COOK_TIME = 8.0,          -- 每烧一件成品耗时（秒）
+    MAX_INPUT = 64,           -- 材料槽最大堆叠（按物品自身 maxStack 为准，这里只兜底）
+    MAX_FUEL  = 64,
+    MAX_OUTPUT = 64,
+    UPDATE_BUDGET = 16,       -- 每帧最多推进多少台熔炉的进度（性能兜底）
+}
+
+-- 燃料：物品 ID → 可烧炼的「成品件数」（1 件 = 1 个 COOK_TIME）
+GameConfig.Fuel = {
+    coal = 8,                 -- 煤炭 8 件
+    block = { [4] = 2, [19] = 1.5, [23] = 8 },   -- 原木 2 / 木板 1.5 / 熔炉 8（简化，允许小数按比例折算燃烧时间）
+    stick = 0.5,
+}
+
+-- 烧炼配方：输入物品 ID → 输出 { id, count }
+GameConfig.Smelting = {
+    ["block:25"] = { id = "iron_ingot",    count = 1 },  -- 铁矿石 → 铁锭
+    ["block:26"] = { id = "gold_ingot",    count = 1 },  -- 金矿石 → 金锭
+    ["block:68"] = { id = "copper_ingot",  count = 1 },  -- 铜矿石 → 铜锭
+    ["block:27"] = { id = "diamond",       count = 1 },  -- 钻石矿石 → 钻石
+    ["block:24"] = { id = "coal",          count = 1 },  -- 煤矿石 → 煤炭
+    ["block:28"] = { id = "redstone",      count = 4 },  -- 红石矿石 → 红石粉
+    ["block:29"] = { id = "lapis_lazuli",  count = 4 },  -- 青金石矿石 → 青金石
+    ["block:69"] = { id = "emerald",       count = 1 },  -- 绿宝石矿石 → 绿宝石
+    ["block:6"]  = { id = "block:38",      count = 1 },  -- 沙 → 玻璃
+    ["block:13"] = { id = "block:3",       count = 1 },  -- 圆石 → 石头
+    ["block:32"] = { id = "block:20",      count = 1 },  -- 黏土 → 砖块
+    ["block:4"]  = { id = "charcoal",      count = 1 },  -- 原木 → 木炭
+    ["beef"]        = { id = "cooked_beef",     count = 1 },  -- 生牛肉 → 熟牛肉
+    ["porkchop"]    = { id = "cooked_porkchop", count = 1 },  -- 生猪肉 → 熟猪肉
+    ["chicken_meat"]= { id = "cooked_chicken",  count = 1 },  -- 生鸡肉 → 熟鸡肉
+    ["raw_fish"]    = { id = "cooked_fish",     count = 1 },  -- 生鱼 → 熟鱼
+}
+```
+
+新增物品（`data/ItemDefinitions.lua` 追加）：`copper_ingot`（铜锭）、`emerald`（绿宝石）、`redstone`（红石粉）、`lapis_lazuli`（青金石）、`charcoal`（木炭）、`cooked_beef` / `cooked_porkchop` / `cooked_chicken` / `raw_fish` / `cooked_fish`（食物，写 `foodHunger/foodSaturation`，见「饥饿饱和度」一节）。
+
+新增方块：`LIT_FURNACE`（燃烧态熔炉，ID 72）——为了省状态位，燃烧与否用**独立方块**表示（与门用 blockState 不同）：燃烧时把方块从 `FURNACE`(23) 换成 `LIT_FURNACE`(72)，`LIT_FURNACE` 设 `hasLight=true, lightRadius=13`，熄灭换回。`AtlasLayout.ROWS` 加 `furnace_lit_side`，两套材质包各加生成器，`BlockRegistry:register(72, "lit_furnace", {...})`。
+
+### 1.2 模块划分
+
+| 模块 | 职责 |
+|---|---|
+| `items/FurnaceManager.lua` | 方块实体注册表 + 每帧烧炼推进 + 放置/破坏时的登记/销毁 |
+| `ui/FurnaceUI.lua` | 熔炉界面：3 槽（材料/燃料/成品）+ 进度条 + 火焰动画 |
+| `data/SmeltingRecipes.lua`（或并入 `GameConfig.Smelting`） | 烧炼配方查询 |
+
+### 1.3 方块实体数据结构
+
+`FurnaceManager` 内部维护：
+
+```lua
+furnaces = {}  -- key = "x,y,z" 字符串 → {
+--   input  = ItemStack|nil    材料槽
+--   fuel   = ItemStack|nil    燃料槽
+--   output = ItemStack|nil    成品槽
+--   burnTimeLeft = 0          当前燃料还能烧的剩余秒数
+--   progress = 0              当前这一件的烧炼进度（0..COOK_TIME）
+-- }
+```
+
+放置 `FURNACE` 方块时 `registerFurnace(x,y,z)`；破坏时 `unregisterFurnace` 并把 3 个槽的物品作为掉落物 `ItemDropSystem:drop` 掉出。
+
+### 1.4 核心烧炼逻辑（`FurnaceManager:update(timeStep)`）
+
+每帧对所有**燃烧中**的熔炉推进，受 `UPDATE_BUDGET` 限制（超出则本帧留到下帧，避免大量熔炉卡帧）：
+
+1. 若 `burnTimeLeft > 0`：`burnTimeLeft -= timeStep`；`progress += timeStep`。
+2. `progress >= COOK_TIME` 时：检查 `input` 是否可烧（`GameConfig.Smelting` 有该 ID）且 `output` 能容纳（同 ID 可合并或为空槽）→ 消耗 1 个 `input`，产出 1 件 `output`；`progress -= COOK_TIME`（余量保留）。若 `input` 烧空则停止推进。
+3. 若 `burnTimeLeft <= 0`：尝试从 `fuel` 槽消耗 1 个燃料，按 `GameConfig.Fuel` 换算 `burnTimeLeft += 件数 * COOK_TIME`。若 `fuel` 空，则熄火（方块换回 `FURNACE`）。
+4. 燃烧态变化（刚点燃 / 刚熄灭）时：`world:setBlock(x,y,z, LIT_FURNACE or FURNACE)` 触发光照与网格更新。
+
+### 1.5 UI 与交互
+
+- `BlockInteraction` 右键命中 `FURNACE`/`LIT_FURNACE` → `FurnaceUI:open(coord)`（参照工作台右键打开 3×3 合成的 `setCraftingTableHandler` 注入点，在 `Standalone.OnWorldReady` 里 `blockInteraction_:setFurnaceHandler(...)`）。
+- UI：三个格子（左材料、下燃料、右成品）+ 中央箭头进度条（`progress/COOK_TIME`）+ 底部燃料火焰。格子用 `InventorySlot` 复刻，鼠标左键拿整堆/右键拿一半、Shift 快转移（复用背包 UI 的槽位交互）。
+- 关闭时把 UI 中悬停/合成区物品还回对应槽，塞不下则掉落玩家脚下。
+
+### 1.6 存档
+
+熔炉内容属于方块实体数据，随世界不持久化（与现有「世界不持久化」限制一致）。若要保存，把 `furnaces` 序列化进 `items_save.json`（键为坐标），并在读档时恢复——但**熔炉方块本身也会随世界消失**，因此推荐的做法是：存档里同时保存熔炉坐标列表，读档后用 `world:setBlock` 把 `FURNACE` 放回去再恢复内容（与箱子一节同策略，见下）。
+
+---
+
+## 二、箱子与容器存储系统（Chest & Container）
+
+**现状缺口**：`Inventory` 底层可复用到容器，但没有任何箱子/容器方块（`ARCHITECTURE.md` §14.2 明确列为 TODO）。
+
+### 2.1 数据与配置
+
+新增方块 `CHEST`（ID 73），整格实体方块，贴图 `chest_side/chest_top`。`GameConfig.Container = { CHEST_SLOTS = 27 }`。
+
+### 2.2 模块划分
+
+| 模块 | 职责 |
+|---|---|
+| `items/ContainerManager.lua` | 箱子方块实体注册表 + 打开/关闭协调 |
+| `ui/ChestUI.lua` | 箱子界面：箱子 27 格 + 玩家背包 + 快捷栏，支持拖拽/转移 |
+| `items/ContainerInventory.lua` | 可选的轻量容器背包（直接复用 `Inventory.new()` 亦可） |
+
+### 2.3 核心逻辑
+
+1. **容器数据**：`ContainerManager.containers = { [coordKey] = { inventory = Inventory 风格 27 槽 } }`。箱子槽位无装备过滤，可直接复用 `Inventory` 的数据结构但槽位数改为 27（或写一个不带装备槽的简单容器）。
+2. **放置/破坏**：放置 `CHEST` → `registerContainer`；破坏 → 内容全量掉落（`ItemDropSystem:drop`），再 `unregisterContainer`。
+3. **打开**：右键箱子 → `ChestUI:open(coord)`。界面左侧箱子 27 格、右侧玩家背包（主背包 + 快捷栏）。左右互传：Shift 点击快速在箱子与玩家背包间转移整堆；左键拿起/放下、右键拿半/放单个。
+4. **互斥**：单机只有一个玩家，但需保证「背包 UI 与箱子 UI 同时打开时，光标物品不串槽」。做法：箱子 UI 与背包 UI 共享同一光标槽（`ui/InventoryUI.lua` 里的 cursor stack），打开箱子时复用背包 UI 的交互组件，只是把 27 个格子绑定到箱子数据。
+5. **方块变化钩子**：箱子被炸弹人自爆等清方块时，`ContainerManager` 需要监听 `onBlocksCleared`（参照 `TowerManager:rebuildTowers` 的接线）→ 掉落内容并移除容器。
+
+### 2.4 存档
+
+箱子内容 + 箱子坐标写入 `items_save.json`（新增字段 `containers = { [coordKey] = {inventory data} }`）。读档时：因为世界方块不持久化，需要把保存的坐标用 `world:setBlock` 重新放回 `CHEST`，再恢复内容（这是让容器跨会话可用的前提，代价是第一次补世界持久化的子集）。
+
+---
+
+## 三、经验值与等级系统（Experience & Levels）
+
+**现状缺口**：玩家没有经验/等级；附魔（见下）需要一个消耗经验的成长资源。
+
+### 3.1 数据与配置
+
+`GameConfig.XP = { ORB_LIFETIME = 60, ORB_MAGNET_DIST = 6, ORB_MAGNET_SPEED = 8, DEATH_DROP_FRACTION = 0.5 }`。
+
+玩家新增字段（`player/Player.lua`）：`xp`（当前等级内经验）、`level`、`xpTotal`（累计，便于死亡掉落计算）。
+
+经验等级曲线（升到下一级所需经验，MC 近似公式）：
+
+```
+xpForLevel(level) = level >= 16 and (2.5*level*level - 40.5*level + 360)
+                    or (level >= 31 and ... )
+```
+
+建议实现为查表或简单公式：`xpForNext(level) = math.floor(7 + level*1.2 + level*level*0.15)`，`addXp(n)` 累加并循环升级，满级溢出。
+
+### 3.2 核心逻辑
+
+1. **经验来源**：生物死亡按类型给经验（`GameConfig.MobXP`，如僵尸 5、幽灵 3、炸弹人 8、弓箭手 5、动物 1–2）。在 `MobManager.onMobDeath` 接线处：若存在唯一玩家（单机），直接 `player:addXp(xp)`；也可生成经验球实体。
+2. **经验球**（可选 v1 直接结算）：小实体（复用 `ItemEntity` 的悬浮/磁吸/拾取写法），玩家靠近 `ORB_MAGNET_DIST` 内飞向玩家并加经验。为控制成本，同类经验球可合并（参照掉落物合并）。
+3. **死亡惩罚**：玩家死亡时按 `xpTotal * DEATH_DROP_FRACTION` 掉落对应经验球在死亡点（可选，v1 可只扣不落球）。
+4. **HUD**：`ui/UIManager.lua` 加经验条（`player_xp_bar`），`setPlayerXp(cur, next)`；升级时短暂提示（"等级提升到 Lv.X"）。
+
+---
+
+## 四、附魔系统（Enchanting）
+
+**现状缺口**：物品系统预留了 `ItemStack.enchantments` 字段与「附魔数据」判断（堆叠比较时会比较附魔），但没有附魔来源，也没有任何附魔效果。
+
+### 4.1 数据与配置
+
+新增方块 `ENCHANTING_TABLE`（附魔台，ID 74），非整格（占半格高，参照半砖的 `shape` 或直接用整格简化）。`书架`（ID 21）已存在，可作为「提高附魔等级」的加成来源。
+
+新增物品 `lapis_lazuli`（青金石，见烧炼一节）。
+
+`GameConfig.Enchanting = { MAX_BOOKSHELF_RANGE = 2, BOOKSHELF_PER_LEVEL = 15, BASE_COST = 1, MAX_COST = 30, LAPIS_MAX = 3 }`。
+
+附魔定义表（数据驱动，`data/Enchantments.lua`）：
+
+```lua
+-- name / maxLevel / 作用描述 / apply(item, level) 效果
+{
+  sharpness  = { max = 5, apply = 攻击力 +10*level },          -- 锋利
+  protection = { max = 4, apply = 护甲 +10*level },            -- 保护
+  efficiency = { max = 5, apply = 挖掘速度 / 工具耐久消耗 },    -- 效率（本游戏工具无挖掘速度，简化为降低耐久消耗概率）
+  unbreaking = { max = 3, apply = 有 1/(level+1) 概率不消耗耐久 }, -- 耐久
+  fire_aspect = { max = 2, apply = 攻击附加燃烧 },              -- 火焰附加（可选）
+}
+```
+
+### 4.2 核心逻辑
+
+1. **放置/破坏**：同箱子/熔炉，`EnchantingManager` 维护坐标集合；附魔台本身无内容槽，只有位置。
+2. **打开界面**：右键附魔台 → `EnchantingUI`：
+   - 放入一件**可附魔**物品（剑/弓/工具/护甲，即 `durability` 非空或 `attackBonus/armorBonus/toolType` 存在）到物品槽；
+   - 放入 1–3 个青金石到青金石槽；
+   - 展示 1–3 个随机附魔选项（每个选项 = 一个附魔名 + 等级 + 经验消耗）。
+3. **随机附魔**：消耗的等级 `cost = BASE_COST + 随机0..(2*附魔台等级)`；附魔台等级 = 周围 `MAX_BOOKSHELF_RANGE` 范围内书架数 / `BOOKSHELF_PER_LEVEL`（向上取整，封顶 30 级）。附魔种类与等级从玩家可负担的候选中加权随机。
+4. **执行附魔**：点击选项 → 校验玩家 `level >= cost` 且青金石足够 → `player.level -= cost`，`stack.enchantments[附魔名] = 等级`，消耗青金石，物品 `dirty`。
+5. **效果接入**（关键）：
+   - `Inventory:getHeldAttackBonus` / `Player:getAttack`：读取手上 `stack.enchantments.sharpness`，加 `10*level`。
+   - `Inventory:getArmorBonus`：每件装备的 `protection` 加 `10*level`。
+   - `Inventory:damageSlot`：`unbreaking` 概率跳过扣耐久。
+   - 附魔后物品「不可与未附魔同种物品合并」——现有 `ItemStack:canMergeWith` 已比较 `enchantments`，无需改动，但要保证 `enchantments` 序列化进存档（`ItemStack:serialize/deserialize` 已含该字段）。
+
+### 4.3 存档
+
+附魔信息随 `ItemStack` 序列化进 `items_save.json`（已具备）；附魔台方块本身随世界不持久化。
+
+---
+
+## 五、农业种植系统（Farming / Crops）
+
+**现状缺口**：`wheat`（小麦）已有「3 小麦 → 面包」合成配方，但没有获得小麦的途径（既不在掉落表、也没有种植）。MC 的「种地→收获→合成食物」循环是生存核心。
+
+### 5.1 数据与配置
+
+新增方块：
+- `FARMLAND`（耕地，ID 75）：由锄头右键泥土/草方块得到；非整格（顶面略低于整格，参照半砖 `shape` 或整格简化）；湿度用 blockState 存（0/1，附近有水=湿润，湿润生长更快）。
+- `WHEAT_CROP`（小麦作物，ID 76）：交叉网格（`crossMesh=true`，参照高草/花），生长阶段 0–7 存 blockState。
+
+新增物品：`wheat_seed`（小麦种子）、`hoe`（锄头，`toolType="hoe"`）。
+
+`GameConfig.Farming = { STAGES = 7, GROW_MIN = 20, GROW_MAX = 60, WATER_RANGE = 4, NEED_LIGHT = 8, MATURE_STAGE = 7 }`。
+
+### 5.2 核心逻辑
+
+1. **耕地**：锄头右键泥土/草方块 → `FARMLAND`；破坏耕地掉落泥土。耕地若上方被非透明方块覆盖或长时间无水，会退化为泥土（简化：仅支持手动重耕，v1 不做退化）。
+2. **种植**：手持 `wheat_seed` 右键耕地 → 放置 `WHEAT_CROP`（stage=0），消耗 1 种子。
+3. **生长**（随机 tick，非每帧）：`FarmingManager` 维护所有作物坐标集合（放置时加入、破坏时移除），每隔 `CROP_TICK_INTERVAL` 秒随机抽一批作物：
+   - 检查上方有光照（`world:getSkyLight(x,y+1,z) >= NEED_LIGHT` 或方块光足够）；
+   - 湿润（耕地 state 为湿，或 4 格内有水）→ 生长加速；
+   - `stage += 1`，写回 blockState，`world:markChunkDirty`（或仅当 stage 变化导致贴图/形状变化时标脏）。
+4. **收获**：破坏 `WHEAT_CROP`：
+   - stage < MATURE：掉 1 个 `wheat_seed`；
+   - stage == MATURE：掉 1 个 `wheat` + 1–3 个 `wheat_seed`（`data/BlockHarvest.lua` 加掉落表）。
+   - 收割后耕地保留，可再次播种。
+5. **生长阶段贴图**：`AtlasLayout.ROWS` 加 `wheat_stage_0..7`（可复用同一 tile 用 blockState 换 UV，但为简单按阶段建 tile）。
+
+### 5.3 接入
+
+`FarmingManager:update` 挂进 `Standalone.HandleUpdate`；`BlockInteraction` 右键逻辑加「锄头耕地 / 种子种植」分支（放在放置方块之前，参照门/活板门的 `interactive` 分支）。
+
+---
+
+## 六、动物繁殖系统（Animal Breeding）
+
+**现状缺口**：中立动物只会漫游和掉肉，没有繁殖；MC 的「喂食→繁殖→扩充养殖」循环缺失。
+
+### 6.1 数据与配置
+
+`GameConfig.Breeding = { LOVE_MODE_DURATION = 5, BREED_RADIUS = 4, BABY_SCALE = 0.5, GROW_TIME = 240, BREED_COOLDOWN = 60 }`。
+
+繁殖饲料映射（物品 ID → 生物类型列表）：
+
+```lua
+GameConfig.BreedFood = {
+    wheat      = { "COW", "SHEEP" },   -- 小麦
+    apple      = { "PIG" },            -- 苹果
+    wheat_seed = { "CHICKEN" },        -- 小麦种子
+}
+```
+
+### 6.2 核心逻辑
+
+1. **喂食**：玩家手持饲料右键中立生物（在 `BlockInteraction` 或 `MobManager` 的右键命中生物逻辑里，新增「命中生物 → 尝试喂食」分支，优先于攻击）。生物进入「求偶态」`loveMode = true`，头顶爱心特效（粒子/UI），`loveTimer = LOVE_MODE_DURATION` 倒计时。
+2. **繁殖**：两只同种、都处于求偶态、距离 ≤ `BREED_RADIUS` 的动物，周期性检查（`MobManager:update` 内，用时间节流）→ 两只各进入 `BREED_COOLDOWN` 冷却，在两者中点生成一只幼体（`MobManager:spawnMob(type, pos)`，`baby = true`）。
+3. **幼体成长**：幼体 `scale = BABY_SCALE`（`MobModel` 拼装时按 `baby` 缩放），`GROW_TIME` 秒后长成成年（scale 还原为 1，不再视为幼体）。幼体不掉落物品。
+4. **限制**：生物类型数量上限仍受 `MobSpawning.CATEGORY_CAPS.animal` 约束，接近上限时暂停繁殖，避免刷爆。
+5. **数据**：`entity/Mob.lua` 增加 `baby`、`loveMode`、`loveTimer`、`breedCooldown` 字段；`MobManager` 增加 `tryBreed(mobA, mobB)` 与 `spawnBaby`。
+
+### 6.3 接入
+
+`MobManager:update` 内加繁殖检查（与生成/消失同一节流循环）；`BlockInteraction` 右键命中生物加喂食分支。
+
+---
+
+## 七、自然生命回复与饥饿饱和度（Hunger & Saturation）
+
+**现状缺口**：饥饿系统只有「30 秒 -1 饥饿、饥饿归零掉血」；食物直接 `foodHeal` 回血，没有 MC 的「饱和度 + 满饥饿自然回血」机制（`ARCHITECTURE.md` §14.7 已列）。
+
+### 7.1 数据与配置
+
+`GameConfig.Hunger = { SATURATION_MAX = 20, REGEN_INTERVAL = 4.0, REGEN_AMOUNT = 1, REGEN_MIN_HUNGER = 17 }`。
+
+`Player` 新增 `saturation`（饱和度，0–20），`foodSaturation` 字段加到所有食物物品定义。
+
+### 7.2 核心逻辑
+
+1. **进食**：`Player:eat(hunger, heal, saturation)` 三参数化：先填饥饿、再填饱和度（食物 `foodHeal` 保留为「少量即时回血」，也可改为只在饥饿满时才回血——按 MC，回血来自饱和度，建议把 `foodHeal` 语义改为 `foodSaturation` 为主，`foodHeal` 仅作急救药/金苹果类）。
+2. **消耗顺序**（每 30 秒一次结算，替换现有 `hungerTimer` 逻辑）：
+   - `saturation > 0` → `saturation -= 1`；
+   - 否则 `hunger > 0` → `hunger -= 1`；
+   - 否则 `starveTimer` 累积 → 每 4 秒掉 1 血（现有逻辑保留）。
+3. **自然回血**：当 `hunger >= REGEN_MIN_HUNGER`（17）且 `saturation > 0` 且 `health < maxHealth` 时，每 `REGEN_INTERVAL` 秒 `health += REGEN_AMOUNT`，同时 `saturation -= 1`。饥饿/饱和度不足则停止回血。
+4. **HUD**：饥饿条仍显示 `hunger/maxHunger`；饱和度用饥饿条上的「鸡腿光泽/高亮」表示（`ui/UIManager.lua` 可选），v1 可只在数值上体现。
+
+### 7.3 接入
+
+改造 `Player:update` 里的饥饿结算分支与 `ItemBehaviors.useFood`（读取 `foodSaturation` 传入 `eat`）；食物定义补 `foodSaturation`（苹果 4、面包 6、熟肉更高、生肉较低等）。
+
+---
+
+## 八、天气系统（Weather：晴 / 雨 / 雷雨 / 雪）
+
+**现状缺口**：世界只有昼夜，没有天气；MC 的雨/雪/雷暴影响光照、氛围与战斗。
+
+### 8.1 数据与配置
+
+`GameConfig.Weather = { ENABLED = true, CLEAR_MIN = 240, CLEAR_MAX = 600, RAIN_MIN = 120, RAIN_MAX = 360, THUNDER_CHANCE = 0.25, LIGHTNING_INTERVAL_MIN = 15, LIGHTNING_INTERVAL_MAX = 60 }`。
+
+### 8.2 模块划分
+
+`world/WeatherManager.lua`：天气状态机 + 随机切换 + 降水粒子/音效 + 雷电。
+
+### 8.3 核心逻辑
+
+1. **状态机**：`CLEAR → RAIN(含雷雨) → CLEAR` 随机循环。`isRaining / isThunder / isSnowing(基于群系)`。
+2. **降水**：`RAIN` 时，玩家周围生成下落粒子（复用/扩展 `rendering/ParticleSystem.lua`，或雨用独立粒子层），降低天空光照（`world` 光照系统加一个全局 `weatherLightPenalty`，或在渲染层压暗）。`MOUNTAINS`（雪线以上）落雪而非雨。
+3. **雷雨**：`isThunder` 时每隔随机间隔在玩家附近（或随机已加载区块）生成一次闪电：闪光点光源（参照炸弹人自爆的 `spawnExplosionEffect` 写法）+ 雷声（`engine-docs/api/audio.md`）。闪电命中生物 → 造成伤害（`mob:takeDamage(大量攻击力)`）；命中可燃物可选点火（v1 仅伤害 + 闪光）。
+4. **影响**：下雨时露天怪物在白天也可生成（可选，MC 规则）；下雨让天空变暗（视觉氛围）。
+5. **接入**：`WeatherManager:update(timeStep)` 挂进 `HandleUpdate`；`GameSystems:isNight()` 之外新增 `WeatherManager:isRaining()` 供生物生成/生长判断使用。
+
+---
+
+## 九、钓鱼系统（Fishing）
+
+**现状缺口**：没有钓鱼竿、没有鱼、也没有钓鱼行为；水目前只能装桶，不能钓鱼。
+
+### 9.1 数据与配置
+
+新增物品：`fishing_rod`（钓鱼竿，`behavior="fishing_rod"`，耐久 64）、`raw_fish`（生鱼）、`cooked_fish`（熟鱼，见烧炼）。
+
+`GameConfig.Fishing = { CAST_REQUIRES_WATER = true, BITE_MIN = 5, BITE_MAX = 15, REEL_WINDOW = 2.0, ROD_DURABILITY_COST = 1, BOB_DISTANCE = 6 }`。
+
+### 9.2 核心逻辑
+
+1. **抛竿**：手持钓鱼竿右键水面（`BlockInteraction` 射线命中 `WATER` 或水面）→ 生成浮漂实体（`FishingBobber`，小节点 + 悬浮/下沉动画，参照 `ItemEntity` 的节点管理）。
+2. **等待咬钩**：浮漂入水后 `BITE_MIN..BITE_MAX` 秒随机咬钩，浮漂下坠（视觉 + 音效），进入 `REEL_WINDOW` 秒的可收杆窗口。
+3. **收杆**：窗口内右键再次使用钓鱼竿 → 结算钓获（从 `GameConfig.FishingLoot` 加权抽 1 件），生成掉落物（或直接进背包），消耗鱼竿耐久；窗口错过则浮漂消失、无收获。
+4. **钓获表**：`GameConfig.FishingLoot = { {id="raw_fish", weight=50}, {id="stick", weight=10}, {id="leather", weight=5}, ... 稀有宝藏 }`。
+5. **接入**：`ItemBehaviors` 加 `fishing_rod` 策略；`FishingManager:update` 挂 `HandleUpdate`；`ProjectileManager` 之外的独立小系统，或复用其投射物框架。
+
+---
+
+## 十、红石系统（Redstone，简化版）
+
+**现状缺口**：`Design.md` 开头提到「红石停住」作为区块模拟的类比，但没有任何红石方块或信号逻辑；`redstone_ore` 挖掉也只会掉矿石方块，没有「红石粉」概念。MC 的「拉杆→红石线→灯/门」是标志性玩法。
+
+### 10.1 数据与配置
+
+新增方块（顺延 ID）：
+
+| ID | 方块 | 说明 |
+|---|---|---|
+| 77 | `redstone_dust` | 红石粉（平铺，非整格，信号强度 0–15 存 blockState） |
+| 78 | `redstone_torch` | 红石火把（非整格 `isItem` 或 `crossMesh`，反向输出） |
+| 79 | `redstone_block` | 红石块（恒为强信号源，无状态） |
+| 80 | `lever` | 拉杆（开关输入，blockState 存 on/off + facing） |
+| 81 | `stone_button` | 石按钮（脉冲输入，按下短暂激活后复位） |
+| 82 | `redstone_lamp` | 红石灯（受信号点亮，`hasLight=true`，亮/灭用 blockState） |
+
+新增物品 `redstone`（红石粉，材料，`block:77` 由方块物品自动生成；同时红石粉也是烧炼产物，见烧炼一节）。
+
+`GameConfig.Redstone = { MAX_SIGNAL = 15, UPDATE_BUDGET = 64, BUTTON_PULSE = 1.0 }`。
+
+### 10.2 核心逻辑（简化信号传播）
+
+1. **信号源**：拉杆（持续 on/off）、按钮（按下 1 秒后复位）、红石块（恒 15）、红石火把（自身 on，被输入时 off → 反向）。
+2. **传播**：红石粉向 4 邻（水平）传播，每格衰减 1（信号 15 → 0）；可上/下一格连通（简化：仅支持同层 4 邻 + 向上/下 1 格台阶，参照 A* 的 STEP_HEIGHT 思路）。遇不透明方块阻断；穿过红石粉继续衰减。
+3. **更新方式**：**事件驱动 + BFS**，不是每帧全图扫描。放置/破坏拉杆、按钮、红石粉、红石火把、红石块时，触发 `RedstoneManager:recomputeFrom(x,y,z)`：BFS 计算受影响区域每格信号强度，写入 `world:setBlockState`（存信号值），并更新输出方块（灯亮/灭、门/活板门开关）。受 `UPDATE_BUDGET` 限制，超出分帧处理。
+4. **输出**：
+   - `redstone_lamp`：信号 ≥ 1 时亮（blockState `lit=1`，`world:setBlockLight` 注入光源），0 时灭。
+   - 门/活板门：信号变化时切换 `open` 状态（复用现有 `interactive` 开关逻辑）。
+5. **红石火把**：默认点亮（作为 15 级信号源）；若其所在方块被红石信号充能 → 熄灭（反向）。熄灭/点亮同样触发重算。
+6. **性能**：只在方块变化时重算，且 BFS 限制在「已加载区块」内（参照光照 BFS 的「只在已生成区块间传播」教训）。
+
+### 10.3 接入
+
+`BlockInteraction` 放置/破坏方块后，若方块是红石类 → 调 `RedstoneManager:onBlockChanged`（与 `TowerManager:onBlockChanged` 同一条 `setBlockChangedHandler` 链）。`RedstoneManager:update` 处理按钮复位等定时器。
+
+---
+
+## 十一、统一接入清单（Standalone 接线）
+
+在 `network/Standalone.lua` 的 `OnWorldReady` 中新增：
+
+```lua
+-- 方块实体与玩法系统
+furnaceManager_   = FurnaceManager.new(scene_, world_)    -- 熔炉
+containerManager_ = ContainerManager.new(scene_, world_)  -- 箱子
+enchantingManager_= EnchantingManager.new(scene_, world_) -- 附魔台
+farmingManager_   = FarmingManager.new(world_)            -- 农业
+weatherManager_   = WeatherManager.new(scene_, world_)    -- 天气
+fishingManager_   = FishingManager.new(scene_, world_)    -- 钓鱼
+redstoneManager_  = RedstoneManager.new(world_)           -- 红石
+
+-- 方块变化分发：TowerManager 之后追加
+blockInteraction_:setBlockChangedHandler(function(x, y, z, oldType, newType)
+    if towerManager_       then towerManager_:onBlockChanged(x, y, z, oldType, newType) end
+    if containerManager_   then containerManager_:onBlockChanged(x, y, z, oldType, newType) end
+    if enchantingManager_  then enchantingManager_:onBlockChanged(x, y, z, oldType, newType) end
+    if farmingManager_     then farmingManager_:onBlockChanged(x, y, z, oldType, newType) end
+    if redstoneManager_    then redstoneManager_:onBlockChanged(x, y, z, oldType, newType) end
+end)
+
+-- 右键交互注入（工作台之外）
+blockInteraction_:setFurnaceHandler(function(coord) furnaceManager_:open(coord) end)
+blockInteraction_:setChestHandler(function(coord) containerManager_:open(coord) end)
+blockInteraction_:setEnchantingHandler(function(coord) enchantingManager_:open(coord) end)
+
+-- 生物死亡 → 经验（挂到 mobManager_.onMobDeath 现有函数之后）
+```
+
+在 `HandleUpdate` 中新增（按依赖顺序，放在 `TowerManager.update` 之后）：
+
+```lua
+if furnaceManager_    then furnaceManager_:update(timeStep) end
+if containerManager_  then containerManager_:update(timeStep) end
+if enchantingManager_ then enchantingManager_:update(timeStep) end
+if farmingManager_    then farmingManager_:update(timeStep) end
+if weatherManager_    then weatherManager_:update(timeStep) end
+if fishingManager_    then fishingManager_:update(timeStep) end
+if redstoneManager_   then redstoneManager_:update(timeStep) end
+```
+
+`Standalone.Stop()` 里对应加 `:destroy()` 与置 nil（参照 `towerManager_`）。
+
+---
+
+## 十二、验收要点（建议自动化脚本）
+
+| 系统 | 关键断言 |
+|---|---|
+| 熔炉 | 放铁矿+煤炭 → 燃烧态方块（LIT_FURNACE）→ 8 秒后产出铁锭、消耗 1 矿 1 煤；熄火后换回 FURNACE |
+| 箱子 | 放箱子 → 放入物品 → 破坏箱子掉落内容；重新打开内容一致 |
+| 经验/附魔 | 击杀生物加经验；附魔台消耗等级+青金石后 `stack.enchantments` 非空；锋利剑攻击力提升 |
+| 农业 | 耕地方块放置 → 种小麦 → 随机 tick 后 stage 增长 → 成熟收割掉小麦+种子 |
+| 繁殖 | 喂两只牛小麦 → 求偶态 → 生成幼体 → 幼体长大后不掉落物品 |
+| 饥饿 | 饥饿满 + 饱和度 > 0 时血量缓慢回升；饥饿归零仍掉血 |
+| 天气 | 切换到 RAIN 后天空变暗、粒子出现；雷雨有闪电闪光 |
+| 钓鱼 | 水面抛竿 → 浮漂入水 → 收杆得鱼/杂物、消耗鱼竿耐久 |
+| 红石 | 放拉杆+红石线+红石灯 → 拉杆 on 灯亮、off 灯灭；红石火把被充能后熄灭 |
+
+> 这些系统与现有代码的关键衔接点（方块 ID 顺延、物品 ID 字符串、`World:setBlock/setBlockState`、`Inventory` 复用、
+> `ItemStack.enchantments`、`blockInteraction_` 回调注入、`HandleUpdate` 主循环、`ItemSaveSystem` 存档）均已按当前工程约定给出，
+> 实现时无需改动既有方块 ID 与既有玩法逻辑。

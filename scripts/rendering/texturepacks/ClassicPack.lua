@@ -1316,6 +1316,12 @@ ClassicPack.tileGenerators = {
     diamond_ore  = oreGen({ r = 0.42, g = 0.90, b = 0.92 }, 5, 3304),
     redstone_ore = oreGen({ r = 0.82, g = 0.14, b = 0.12 }, 8, 3305),
     lapis_ore    = oreGen({ r = 0.16, g = 0.30, b = 0.76 }, 7, 3306),
+
+    -- Row 5：新增矿石
+    copper_ore      = oreGen({ r = 0.85, g = 0.48, b = 0.28 }, 6, 3307),
+    emerald_ore     = oreGen({ r = 0.18, g = 0.78, b = 0.38 }, 5, 3308),
+    adamant_ore     = oreGen({ r = 0.20, g = 0.34, b = 0.50 }, 7, 3309),
+    flame_stone_ore = oreGen({ r = 0.92, g = 0.45, b = 0.14 }, 7, 3310),
     glowstone    = ClassicPack.generateGlowstone,
     gravel       = ClassicPack.generateGravel,
     clay         = ClassicPack.generateClay,

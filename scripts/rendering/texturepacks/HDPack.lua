@@ -1593,6 +1593,12 @@ HDPack.tileGenerators = {
     diamond_ore  = oreGen({ r = 0.42, g = 0.90, b = 0.92 }, 5, 5304, 0.10, 0.10),
     redstone_ore = oreGen({ r = 0.82, g = 0.14, b = 0.12 }, 8, 5305, 0.45, 0.0),
     lapis_ore    = oreGen({ r = 0.16, g = 0.30, b = 0.76 }, 7, 5306, 0.25, 0.10),
+
+    -- Row 5：新增矿石
+    copper_ore      = oreGen({ r = 0.85, g = 0.48, b = 0.28 }, 6, 5307, 0.25, 0.75),
+    emerald_ore     = oreGen({ r = 0.18, g = 0.78, b = 0.38 }, 5, 5308, 0.12, 0.15),
+    adamant_ore     = oreGen({ r = 0.20, g = 0.34, b = 0.50 }, 7, 5309, 0.20, 0.60),
+    flame_stone_ore = oreGen({ r = 0.92, g = 0.45, b = 0.14 }, 7, 5310, 0.40, 0.05),
     glowstone       = HDPack.generateGlowstone,
     gravel          = HDPack.generateGravel,
     clay            = HDPack.generateClay,

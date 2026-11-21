@@ -45,19 +45,76 @@ local function makeRng(seed)
     end
 end
 
--- 矿脉 / 地质团定义：depth 用绝对 y，按 WORLD_HEIGHT=80（medium 预设）标定
--- chance = 每个空间格的投放概率，size = 游走步数区间
+-- 矿脉 / 地质团定义（Design.md「矿石」）：
+--   depth 用绝对 y，按 WORLD_HEIGHT=80（medium 预设）标定
+--   chance = 该矿石在 peakY 处的投放概率（越偏离 peakY 概率越低，见 heightProbability）
+--   size   = 矿脉游走步数区间（= 最多尝试生成的矿石方块数）
+--   peakY  = 高度概率最高点（三角分布）；缺省则 minY~maxY 均匀分布
+--   biomes = 生物群系限制（nil = 不限；emerald/flame 只出山地）
 local GEO_FEATURES = {
-    { name = "coal",     block = Blocks.COAL_ORE,     minY = 6, maxY = 52, chance = 0.55, sizeMin = 6, sizeMax = 14, salt = 101 },
-    { name = "iron",     block = Blocks.IRON_ORE,     minY = 4, maxY = 40, chance = 0.40, sizeMin = 4, sizeMax = 9,  salt = 102 },
-    { name = "gold",     block = Blocks.GOLD_ORE,     minY = 2, maxY = 22, chance = 0.18, sizeMin = 3, sizeMax = 7,  salt = 103 },
-    { name = "lapis",    block = Blocks.LAPIS_ORE,    minY = 2, maxY = 26, chance = 0.14, sizeMin = 3, sizeMax = 6,  salt = 104 },
-    { name = "redstone", block = Blocks.REDSTONE_ORE, minY = 2, maxY = 14, chance = 0.20, sizeMin = 4, sizeMax = 8,  salt = 105 },
-    { name = "diamond",  block = Blocks.DIAMOND_ORE,  minY = 1, maxY = 13, chance = 0.10, sizeMin = 2, sizeMax = 5,  salt = 106 },
-    { name = "gravel",   block = Blocks.GRAVEL,       minY = 8, maxY = 56, chance = 0.30, sizeMin = 8, sizeMax = 20, salt = 107 },
+    { name = "coal",     block = Blocks.COAL_ORE,     minY = 6,  maxY = 52, peakY = 29, chance = 0.55, sizeMin = 8,  sizeMax = 17, salt = 101 },
+    { name = "iron",     block = Blocks.IRON_ORE,     minY = 4,  maxY = 40, peakY = 20, chance = 0.40, sizeMin = 4,  sizeMax = 9,  salt = 102 },
+    { name = "gold",     block = Blocks.GOLD_ORE,     minY = 2,  maxY = 22, peakY = 10, chance = 0.18, sizeMin = 2,  sizeMax = 5,  salt = 103 },
+    { name = "lapis",    block = Blocks.LAPIS_ORE,    minY = 2,  maxY = 26, peakY = 14, chance = 0.14, sizeMin = 2,  sizeMax = 7,  salt = 104 },
+    { name = "redstone", block = Blocks.REDSTONE_ORE, minY = 2,  maxY = 14, peakY = 8,  chance = 0.20, sizeMin = 4,  sizeMax = 8,  salt = 105 },
+    { name = "diamond",  block = Blocks.DIAMOND_ORE,  minY = 1,  maxY = 13, peakY = 5,  chance = 0.10, sizeMin = 1,  sizeMax = 4,  salt = 106 },
+    { name = "copper",   block = Blocks.COPPER_ORE,   minY = 10, maxY = 44, peakY = 27, chance = 0.35, sizeMin = 6,  sizeMax = 12, salt = 109 },
+    { name = "emerald",  block = Blocks.EMERALD_ORE,  minY = 4,  maxY = 30, peakY = 14, chance = 0.05, sizeMin = 1,  sizeMax = 3,  salt = 110, biomes = { "mountains" } },
+    { name = "adamant",  block = Blocks.ADAMANT_ORE,  minY = 2,  maxY = 24, peakY = 12, chance = 0.20, sizeMin = 4,  sizeMax = 9,  salt = 111 },
+    { name = "flame_ore",block = Blocks.FLAME_STONE_ORE, minY = 2, maxY = 16, peakY = 8, chance = 0.05, sizeMin = 1, sizeMax = 3, salt = 112, biomes = { "mountains" } },
+    { name = "gravel",   block = Blocks.GRAVEL,       minY = 8,  maxY = 56, chance = 0.30, sizeMin = 8,  sizeMax = 20, salt = 107 },
     -- 岩浆池：发光方块，坐标要记下来在天光灌注后补 blockLight
-    { name = "lava",     block = Blocks.LAVA,         minY = 1, maxY = 8,  chance = 0.22, sizeMin = 4, sizeMax = 12, salt = 108, emitsLight = true },
+    { name = "lava",     block = Blocks.LAVA,         minY = 1,  maxY = 8,  peakY = 4,  chance = 0.22, sizeMin = 4,  sizeMax = 12, salt = 108, emitsLight = true },
 }
+
+-- 群系编号 → 名称（矿石生成用）
+local BIOME_NAMES = {
+    [BiomeGenerator.PLAINS] = "plains",
+    [BiomeGenerator.FOREST] = "forest",
+    [BiomeGenerator.DESERT] = "desert",
+    [BiomeGenerator.MOUNTAINS] = "mountains",
+}
+
+---三角分布高度概率：peakY 处最高（1），向 minY / maxY 两端线性降到 0
+---@param def table 地质特征定义
+---@param y number 世界 y
+---@return number 0~1 的概率因子
+local function heightProbability(def, y)
+    if y < def.minY or y > def.maxY then
+        return 0
+    end
+    if not def.peakY then
+        return 1
+    end
+    local range = def.maxY - def.minY
+    if range <= 0 then
+        return 1
+    end
+    local t = (y - def.minY) / range
+    local mode = (def.peakY - def.minY) / range
+    if t <= mode then
+        return mode > 0 and (t / mode) or 1
+    else
+        return mode < 1 and ((1 - t) / (1 - mode)) or 1
+    end
+end
+
+---判断某群系是否允许该矿石生成
+---@param def table 地质特征定义
+---@param biomeId number 群系编号
+---@return boolean
+local function biomeAllowed(def, biomeId)
+    if not def.biomes then
+        return true
+    end
+    local key = BIOME_NAMES[biomeId]
+    for _, allowed in ipairs(def.biomes) do
+        if allowed == key then
+            return true
+        end
+    end
+    return false
+end
 
 ---@class WorldGenerator
 ---@field biome BiomeGenerator
@@ -329,14 +386,20 @@ function WorldGenerator:generateChunkGeologicalFeatures(world, chunkX, chunkZ)
     for cx = cellMinX, cellMaxX do
         for cz = cellMinZ, cellMaxZ do
             for cy = 0, cellMaxY do
+                local cellY = cy * CELL + CELL * 0.5
                 for _, def in ipairs(GEO_FEATURES) do
-                    local rng = makeRng(hashCell(cx, cy, cz, def.salt + seed))
-                    if rng() < def.chance then
-                        local x = cx * CELL + math.floor(rng() * CELL)
-                        local y = cy * CELL + math.floor(rng() * CELL)
-                        local z = cz * CELL + math.floor(rng() * CELL)
-                        if y >= def.minY and y <= def.maxY then
-                            self:growVeinInChunk(world, x, y, z, def, rng, minX, maxX, minZ, maxZ)
+                    -- 高度概率（三角分布）：越偏离 peakY 越难生成
+                    local heightF = heightProbability(def, cellY)
+                    if heightF > 0 then
+                        local rng = makeRng(hashCell(cx, cy, cz, def.salt + seed))
+                        if rng() < def.chance * heightF then
+                            local x = cx * CELL + math.floor(rng() * CELL)
+                            local y = cy * CELL + math.floor(rng() * CELL)
+                            local z = cz * CELL + math.floor(rng() * CELL)
+                            if y >= def.minY and y <= def.maxY
+                                and biomeAllowed(def, self.biome:getBiome(x, z)) then
+                                self:growVeinInChunk(world, x, y, z, def, rng, minX, maxX, minZ, maxZ)
+                            end
                         end
                     end
                 end
@@ -442,16 +505,22 @@ function WorldGenerator:generateGeologicalFeatures(world, centerX, centerZ, radi
             local wz = cz * CELL + CELL * 0.5 - centerZ
             if wx * wx + wz * wz <= (radius + CELL) * (radius + CELL) then
                 for cy = 0, cellMaxY do
+                    local cellY = cy * CELL + CELL * 0.5
                     for _, def in ipairs(GEO_FEATURES) do
-                        local rng = makeRng(hashCell(cx, cy, cz, def.salt + seed))
-                        if rng() < def.chance then
-                            local x = cx * CELL + math.floor(rng() * CELL)
-                            local y = cy * CELL + math.floor(rng() * CELL)
-                            local z = cz * CELL + math.floor(rng() * CELL)
-                            if y >= def.minY and y <= def.maxY then
-                                local placed = self:growVein(world, x, y, z, def, rng)
-                                if placed > 0 then
-                                    stats[def.name] = (stats[def.name] or 0) + placed
+                        -- 高度概率（三角分布）：越偏离 peakY 越难生成
+                        local heightF = heightProbability(def, cellY)
+                        if heightF > 0 then
+                            local rng = makeRng(hashCell(cx, cy, cz, def.salt + seed))
+                            if rng() < def.chance * heightF then
+                                local x = cx * CELL + math.floor(rng() * CELL)
+                                local y = cy * CELL + math.floor(rng() * CELL)
+                                local z = cz * CELL + math.floor(rng() * CELL)
+                                if y >= def.minY and y <= def.maxY
+                                    and biomeAllowed(def, self.biome:getBiome(x, z)) then
+                                    local placed = self:growVein(world, x, y, z, def, rng)
+                                    if placed > 0 then
+                                        stats[def.name] = (stats[def.name] or 0) + placed
+                                    end
                                 end
                             end
                         end

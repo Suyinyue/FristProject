@@ -35,6 +35,7 @@ local AI = Config.MobAI
 ---@field sm AIStateMachine
 ---@field decisionTimer number
 ---@field canDecide boolean
+---@field isNight boolean
 ---@field attackCooldown number
 ---@field target Player|nil
 ---@field loseTimer number
@@ -67,6 +68,7 @@ function AIController.new(mob, world, def)
 
     self.decisionTimer = 0
     self.canDecide = false
+    self.isNight = false
     self.attackCooldown = 0
     self.target = nil
     self.loseTimer = 0
@@ -144,6 +146,10 @@ function AIController:detect(player)
     if not player or player:isDead() then
         return nil
     end
+    -- 夜晚：敌对生物无视距离与视线，全部锁定玩家（Design.md「敌对生物」）
+    if self.isNight then
+        return player
+    end
     local mp = self.mob:getPosition()
     local pp = player:getPosition()
     local dx = pp.x - mp.x
@@ -176,6 +182,10 @@ end
 function AIController:isTargetValid(player)
     if not player or player:isDead() then
         return false
+    end
+    -- 夜晚：目标只要存活就一直有效，不受距离限制
+    if self.isNight then
+        return true
     end
     local mp = self.mob:getPosition()
     local pp = player:getPosition()
@@ -345,8 +355,8 @@ function AIController:updateChasing(dt, player)
         return 0, 0, dx, dz
     end
 
-    -- 目标长时间不可见（隔墙）→ 判定丢失
-    if self.canDecide then
+    -- 目标长时间不可见（隔墙）→ 判定丢失（夜晚追踪不受此限制）
+    if self.canDecide and not self.isNight then
         if AI.REQUIRE_LOS and not self:hasLineOfSight(player) then
             self.noLosTimer = self.noLosTimer + AI.TICK_INTERVAL
         else
@@ -449,11 +459,13 @@ end
 ---每帧更新（由 Mob:update 调用）
 ---@param dt number
 ---@param player Player
+---@param isNight boolean|nil
 ---@return number moveX
 ---@return number moveZ
 ---@return number faceX
 ---@return number faceZ
-function AIController:update(dt, player)
+function AIController:update(dt, player, isNight)
+    self.isNight = isNight or false
     if self.attackCooldown > 0 then
         self.attackCooldown = self.attackCooldown - dt
     end

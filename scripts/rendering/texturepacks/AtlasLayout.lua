@@ -40,11 +40,12 @@ local ROWS = {
         "cactus_top", "cactus_side", "cactus_bottom",
     },
 
-    -- Row 5：透明 + 羊毛 + 植物
+    -- Row 5：透明 + 羊毛 + 植物 + 新增矿石
     [5] = {
         "glass",
         "wool_white", "wool_red", "wool_yellow", "wool_green", "wool_blue", "wool_black",
         "sapling", "dead_bush", "mushroom_red", "mushroom_brown",
+        "copper_ore", "emerald_ore", "adamant_ore", "flame_stone_ore",
     },
 
     -- Row 6：门 / 活板门（半砖、楼梯、栅栏复用各自材质的 tile，不占新格子）

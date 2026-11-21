@@ -786,6 +786,35 @@ BlockRegistry:register(67, "adamant", {
     textures = { top = T.adamant, side = T.adamant, bottom = T.adamant },
 })
 
+-- 新增矿石（Design.md「矿石」）：铜矿 / 绿宝石矿 / 金刚岩矿 / 火焰石矿
+BlockRegistry.COPPER_ORE = 68
+BlockRegistry:register(68, "copper_ore", {
+    displayName = "Copper Ore",
+    color = Color(0.85, 0.48, 0.28),
+    textures = { top = T.copper_ore, side = T.copper_ore, bottom = T.copper_ore },
+})
+
+BlockRegistry.EMERALD_ORE = 69
+BlockRegistry:register(69, "emerald_ore", {
+    displayName = "Emerald Ore",
+    color = Color(0.18, 0.78, 0.38),
+    textures = { top = T.emerald_ore, side = T.emerald_ore, bottom = T.emerald_ore },
+})
+
+BlockRegistry.ADAMANT_ORE = 70
+BlockRegistry:register(70, "adamant_ore", {
+    displayName = "Adamant Ore",
+    color = Color(0.20, 0.34, 0.50),
+    textures = { top = T.adamant_ore, side = T.adamant_ore, bottom = T.adamant_ore },
+})
+
+BlockRegistry.FLAME_STONE_ORE = 71
+BlockRegistry:register(71, "flame_stone_ore", {
+    displayName = "Flame Stone Ore",
+    color = Color(0.92, 0.45, 0.14),
+    textures = { top = T.flame_stone_ore, side = T.flame_stone_ore, bottom = T.flame_stone_ore },
+})
+
 -- ============================================
 -- 新增方块示例（只需一行注册！）
 -- ============================================

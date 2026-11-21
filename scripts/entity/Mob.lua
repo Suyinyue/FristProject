@@ -187,7 +187,8 @@ end
 ---每帧更新
 ---@param dt number 时间步长
 ---@param player Player 玩家实例
-function Mob:update(dt, player)
+---@param isNight boolean|nil 是否夜晚
+function Mob:update(dt, player, isNight)
     if self.dead then
         return
     end
@@ -201,7 +202,7 @@ function Mob:update(dt, player)
     self.moving = false
 
     -- AI 决策 + 移动方向（faceX/faceZ 用于静止时面向目标）
-    local moveX, moveZ, faceX, faceZ = self.ai:update(dt, player)
+    local moveX, moveZ, faceX, faceZ = self.ai:update(dt, player, isNight)
 
     local moveDx, moveDz = 0.0, 0.0
     if moveX ~= 0 or moveZ ~= 0 then

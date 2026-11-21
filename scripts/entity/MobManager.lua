@@ -59,6 +59,7 @@ end
 ---@field mobs Mob[]
 ---@field spawnTimer number
 ---@field lastNight boolean|nil
+---@field dayCount number
 ---@field onChunkLoaded function|nil
 ---@field onMobDeath fun(mob: Mob)|nil
 ---@field onBlocksCleared fun(cleared: table[])|nil
@@ -80,6 +81,7 @@ function MobManager.new(scene, world, biome)
     self.mobs = {}
     self.spawnTimer = Config.MobSpawning.SPAWN_INTERVAL
     self.lastNight = nil
+    self.dayCount = 0
     self.onBlocksCleared = nil
     self.onExplosionEffect = nil
     self.mobExplodeCallback = function(mob, player)
@@ -348,13 +350,25 @@ function MobManager:collectCandidateChunks(pcx, pcz)
     return list
 end
 
+---某生物当前的生成权重（敌对怪物权重随天数每天 ×1.1，Design.md「敌对生物」）
+---@param mobType string
+---@return number
+function MobManager:getSpawnWeight(mobType)
+    local def = Config.Mobs[mobType]
+    local w = def and def.weight or 1
+    if def and def.category == "monster" and self.dayCount > 0 then
+        w = w * (1.1 ^ self.dayCount)
+    end
+    return w
+end
+
 ---按权重随机抽选一个生物类型
 ---@param candidates string[]
 ---@return string|nil
 function MobManager:pickWeighted(candidates)
     local total = 0
     for _, t in ipairs(candidates) do
-        total = total + (Config.Mobs[t].weight or 1)
+        total = total + self:getSpawnWeight(t)
     end
     if total <= 0 then
         return nil
@@ -362,7 +376,7 @@ function MobManager:pickWeighted(candidates)
     local roll = math.random() * total
     local acc = 0
     for _, t in ipairs(candidates) do
-        acc = acc + (Config.Mobs[t].weight or 1)
+        acc = acc + self:getSpawnWeight(t)
         if roll <= acc then
             return t
         end
@@ -587,7 +601,7 @@ function MobManager:update(dt, player, isNight)
     -- 更新所有生物 + 清理死亡/过远
     for i = #self.mobs, 1, -1 do
         local mob = self.mobs[i]
-        mob:update(dt, player)
+        mob:update(dt, player, isNight)
 
         local mp = mob:getPosition()
         local dx = mp.x - playerPos.x
@@ -608,11 +622,17 @@ function MobManager:update(dt, player, isNight)
         end
     end
 
-    -- 入夜补一波敌对生物
-    if self.lastNight ~= nil and self.lastNight ~= isNight and isNight then
-        self:runSpawnTask(player, isNight)
-        self:runSpawnTask(player, isNight)
-        print("[Mobs] night falls: hostile spawn wave")
+    -- 昼夜切换：入夜补一波敌对生物；天亮进入新一天（敌对生成权重 ×1.1，Design.md）
+    if self.lastNight ~= nil and self.lastNight ~= isNight then
+        if isNight then
+            self:runSpawnTask(player, isNight)
+            self:runSpawnTask(player, isNight)
+            print("[Mobs] night falls: hostile spawn wave")
+        else
+            self.dayCount = self.dayCount + 1
+            print(string.format("[Mobs] day %d begins: hostile spawn weight x%.2f",
+                self.dayCount, 1.1 ^ self.dayCount))
+        end
     end
     self.lastNight = isNight
 
