@@ -33,6 +33,8 @@ local REQUIRED_TOOL = {
     [Blocks.FURNACE] = "pickaxe",
     [Blocks.ICE] = "pickaxe",
     [Blocks.WALL_COBBLESTONE] = "pickaxe",
+    [Blocks.ADAMANT] = "pickaxe",       -- 金刚岩（防御塔基座）
+    [Blocks.FLAME_STONE] = "pickaxe",   -- 火焰石（防御塔攻击台）
 
     -- 木质方块 → 斧
     [Blocks.WOOD] = "axe",

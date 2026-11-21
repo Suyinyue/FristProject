@@ -48,10 +48,12 @@ local ROWS = {
     },
 
     -- Row 6：门 / 活板门（半砖、楼梯、栅栏复用各自材质的 tile，不占新格子）
+    --         + 建筑方块（防御塔材料）
     [6] = {
         "door_wood_lower", "door_wood_upper",
         "door_iron_lower", "door_iron_upper",
         "trapdoor_wood",
+        "flame_stone", "adamant",
     },
 }
 

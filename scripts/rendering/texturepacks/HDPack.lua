@@ -1486,6 +1486,35 @@ function HDPack:generateTrapdoor(images, sx, sy, size)
 end
 
 -- ====================================================================
+-- 建筑方块（防御塔）
+-- ====================================================================
+
+---火焰石 PBR：暗红岩浆 + 周期裂纹
+function HDPack:generateFlameStone(images, sx, sy, size)
+    local pack = self
+    self:generatePBRTile(images, sx, sy, size, function(x, y, s)
+        local n = pack:periodicSmoothNoise(x, y, s, 9301) * 0.10
+        local crack = pack:periodicSmoothNoise(x * 3, y * 5, s, 9311)
+        local hot = (crack > 0.35) and 0.5 or 0.0
+        return 0.78 + n + hot, 0.22 + n * 0.5 + hot * 0.65, 0.06 + hot * 0.2,
+               1.0, hot, 0.55, 0.0
+    end, { normalStrength = 1.8 })
+end
+
+---金刚岩 PBR：深蓝黑岩底 + 青白晶体
+function HDPack:generateAdamant(images, sx, sy, size)
+    local pack = self
+    self:generatePBRTile(images, sx, sy, size, function(x, y, s)
+        local n = pack:periodicSmoothNoise(x, y, s, 9302) * 0.05
+        local crystal = pack:periodicSmoothNoise(x * 4, y * 4, s, 9312)
+        if crystal > 0.42 then
+            return 0.55, 0.85, 0.98, 1.0, 0.85, 0.15, 0.55
+        end
+        return 0.13 + n, 0.19 + n, 0.28 + n, 1.0, n, 0.45, 0.25
+    end, { normalStrength = 1.4 })
+end
+
+-- ====================================================================
 -- tile 名称 → 生成器（createImages 按 AtlasLayout.order 派发）
 -- ====================================================================
 
@@ -1621,6 +1650,10 @@ HDPack.tileGenerators = {
         self:generateDoor(images, sx, sy, size, { r = 0.72, g = 0.73, b = 0.75 }, true, true, 0.75)
     end,
     trapdoor_wood = HDPack.generateTrapdoor,
+
+    -- Row 6：建筑方块（防御塔）
+    flame_stone = HDPack.generateFlameStone,
+    adamant     = HDPack.generateAdamant,
 }
 
 return HDPack

@@ -764,6 +764,29 @@ BlockRegistry:register(65, "trapdoor_wood", {
 })
 
 -- ============================================
+-- 建筑方块（Design.md「建筑」防御塔）
+-- ============================================
+
+-- 火焰石 66：防御塔攻击台，会发光
+BlockRegistry.FLAME_STONE = 66
+BlockRegistry:register(66, "flame_stone", {
+    displayName = "Flame Stone",
+    color = Color(0.95, 0.42, 0.12),
+    textures = { top = T.flame_stone, side = T.flame_stone, bottom = T.flame_stone },
+    hasLight = true,
+    lightColor = Color(1.0, 0.55, 0.20),
+    lightRadius = 12,
+})
+
+-- 金刚岩 67：防御塔基座
+BlockRegistry.ADAMANT = 67
+BlockRegistry:register(67, "adamant", {
+    displayName = "Adamant Block",
+    color = Color(0.20, 0.30, 0.42),
+    textures = { top = T.adamant, side = T.adamant, bottom = T.adamant },
+})
+
+-- ============================================
 -- 新增方块示例（只需一行注册！）
 -- ============================================
 -- 1. 在 rendering/texturepacks/AtlasLayout.lua 的 ROWS 里加一个 tile 名字

@@ -44,6 +44,7 @@ function BlockInteraction.new(player, world, options)
     self.itemDropSystem = nil  -- 掉落物系统（由外部设置）
     self.projectiles = nil     -- 弓箭投射物（由外部设置）
     self.craftingTableHandler = nil -- 右键工作台回调（由外部设置）
+    self.onBlockChanged = nil       -- 方块放置/破坏回调（防御塔检测用）
     
     -- 网络模式配置
     options = options or {}
@@ -81,6 +82,24 @@ end
 ---@param handler fun()|nil
 function BlockInteraction:setCraftingTableHandler(handler)
     self.craftingTableHandler = handler
+end
+
+---设置方块变化回调（防御塔等结构检测使用）
+---@param handler fun(x: integer, y: integer, z: integer, oldType: integer, newType: integer)|nil
+function BlockInteraction:setBlockChangedHandler(handler)
+    self.onBlockChanged = handler
+end
+
+---通知方块变化
+---@param x integer
+---@param y integer
+---@param z integer
+---@param oldType integer
+---@param newType integer
+function BlockInteraction:notifyBlockChanged(x, y, z, oldType, newType)
+    if self.onBlockChanged then
+        self.onBlockChanged(x, y, z, oldType, newType)
+    end
 end
 
 ---设置服务器连接（联机模式）
@@ -298,6 +317,9 @@ function BlockInteraction:destroyBlockLocal(bx, by, bz)
     -- 移除方块
     self.world:setBlock(bx, by, bz, AIR)
 
+    -- 通知结构系统（防御塔会在这里重新检测基座）
+    self:notifyBlockChanged(bx, by, bz, blockType, AIR)
+
     -- 播放破坏粒子
     if self.particleSystem then
         self.particleSystem:spawnBreakParticles(bx, by, bz, blockType)
@@ -368,9 +390,11 @@ function BlockInteraction:placeBlockLocal(bx, by, bz, blockType, state)
         baseState = self.world:resolveDoorHinge(blockType, bx, by, bz, baseState)
         self.world:setBlock(bx, by, bz, blockType, baseState)
         self.world:setBlock(bx, by + 1, bz, blockType, BlockState.withTopHalf(baseState, true))
+        self:notifyBlockChanged(bx, by, bz, AIR, blockType)
     else
         -- 普通方块放置
         self.world:setBlock(bx, by, bz, blockType, state)
+        self:notifyBlockChanged(bx, by, bz, AIR, blockType)
     end
 
     -- 发送本地事件

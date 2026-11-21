@@ -1195,6 +1195,46 @@ function ClassicPack:generateTrapdoor(image, sx, sy, size)
 end
 
 -- ====================================================================
+-- 建筑方块（防御塔）
+-- ====================================================================
+
+---火焰石：暗红岩浆底 + 亮黄裂纹（防御塔的信号石）
+function ClassicPack:generateFlameStone(image, sx, sy, size)
+    math.randomseed(9301)
+    for y = 0, size - 1 do
+        for x = 0, size - 1 do
+            local n = (math.random() - 0.5) * 0.18
+            local crack = ((x * 3 + y * 5) % 13 == 0) or ((x - y * 2) % 17 == 0)
+            local r, g, b
+            if crack then
+                r, g, b = 1.0, 0.72 + n * 0.3, 0.20
+            else
+                r, g, b = 0.72 + n, 0.20 + n * 0.5, 0.06
+            end
+            image:SetPixel(sx + x, sy + y, Color(r, g, b, 1.0))
+        end
+    end
+end
+
+---金刚岩：深蓝黑岩底 + 青白晶体点（防御塔基座）
+function ClassicPack:generateAdamant(image, sx, sy, size)
+    math.randomseed(9302)
+    for y = 0, size - 1 do
+        for x = 0, size - 1 do
+            local n = (math.random() - 0.5) * 0.10
+            local crystal = ((x * 7 + y * 11) % 19 == 0) or ((x * y) % 23 == 0)
+            local r, g, b
+            if crystal then
+                r, g, b = 0.55, 0.85, 0.98
+            else
+                r, g, b = 0.13 + n, 0.19 + n, 0.28 + n
+            end
+            image:SetPixel(sx + x, sy + y, Color(r, g, b, 1.0))
+        end
+    end
+end
+
+-- ====================================================================
 -- tile 名称 → 生成器（createImage 按 AtlasLayout.order 派发）
 -- ====================================================================
 
@@ -1333,6 +1373,10 @@ ClassicPack.tileGenerators = {
         self:generateDoor(image, sx, sy, size, { r = 0.72, g = 0.73, b = 0.75 }, true, true, 3604)
     end,
     trapdoor_wood = ClassicPack.generateTrapdoor,
+
+    -- Row 6：建筑方块（防御塔）
+    flame_stone = ClassicPack.generateFlameStone,
+    adamant     = ClassicPack.generateAdamant,
 }
 
 return ClassicPack

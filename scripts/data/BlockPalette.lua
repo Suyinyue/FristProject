@@ -78,6 +78,12 @@ BlockPalette.pages = {
             Blocks.DOOR_WOOD, Blocks.DOOR_IRON, Blocks.TRAPDOOR_WOOD,
         },
     },
+    {
+        name = "建筑",
+        blocks = {
+            Blocks.ADAMANT, Blocks.FLAME_STONE,
+        },
+    },
 }
 
 ---@return number 页数

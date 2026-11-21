@@ -127,6 +127,20 @@ CraftingRecipes.recipes = {
         shapeless = { "leather", "leather", "leather" },
         result = { id = "helmet", count = 1 },
     },
+
+    -- ==================== 建筑（防御塔）====================
+    {
+        -- 4 黑曜石 + 1 钻石 → 1 金刚岩（需要工作台 3×3）
+        id = "adamant",
+        shapeless = { "block:17", "block:17", "block:17", "block:17", "diamond" },
+        result = { id = "block:67", count = 1 },
+    },
+    {
+        -- 1 萤石 + 3 煤炭 → 1 火焰石
+        id = "flame_stone",
+        shapeless = { "block:30", "coal", "coal", "coal" },
+        result = { id = "block:66", count = 1 },
+    },
 }
 
 return CraftingRecipes

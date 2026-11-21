@@ -28,6 +28,7 @@ local ItemStack = require("items.ItemStack")
 local ItemDropSystem = require("items.ItemDropSystem")
 local ProjectileManager = require("items.ProjectileManager")
 local ItemSaveSystem = require("items.ItemSaveSystem")
+local TowerManager = require("building.TowerManager")
 
 require "urhox-libs.UI.GameHUD"
 
@@ -56,6 +57,8 @@ local mobManager_ = nil
 local itemDropSystem_ = nil
 ---@type ProjectileManager|nil
 local projectileManager_ = nil
+---@type TowerManager|nil
+local towerManager_ = nil
 ---@type Node
 local cameraNode_ = nil
 ---@type Camera
@@ -207,6 +210,14 @@ function Standalone.OnWorldReady()
         GameSystems:openCraftingTable()
     end)
 
+    -- 防御塔：方块变化时重新检测基座
+    towerManager_ = TowerManager.new(scene_, world_)
+    blockInteraction_:setBlockChangedHandler(function(x, y, z, oldType, newType)
+        if towerManager_ then
+            towerManager_:onBlockChanged(x, y, z, oldType, newType)
+        end
+    end)
+
     -- 创建 UI
     GameSystems:createUI("Standalone", player_, function(blockType)
         selectedBlockType_ = blockType
@@ -266,6 +277,11 @@ function Standalone.OnWorldReady()
         end
     end
 
+    -- 防御塔的索敌数据源
+    towerManager_:setMobProvider(function()
+        return mobManager_ and mobManager_.mobs or {}
+    end)
+
     -- 新加载区块：额外尝试一次「环境原生动物」生成（Design.md）
     chunkStreamer_.onChunkLoaded = function(cx, cz)
         if mobManager_ and player_ then
@@ -320,6 +336,8 @@ function Standalone.giveStartingItems()
         { "block:19", 32 },     -- 木板
         { "stick", 16 },
         { "iron_ingot", 16 },
+        { "block:67", 18 },     -- 金刚岩（防御塔基座，可搭 2 层）
+        { "block:66", 2 },      -- 火焰石（防御塔攻击台）
     }
 
     for _, entry in ipairs(items) do
@@ -394,6 +412,11 @@ function HandleUpdate(eventType, eventData)
     -- 更新生物（按昼夜规则生成）
     if mobManager_ and player_ then
         mobManager_:update(timeStep, player_, GameSystems:isNight())
+    end
+
+    -- 防御塔自动攻击
+    if towerManager_ then
+        towerManager_:update(timeStep)
     end
 
     -- 掉落物 / 拾取 + 弓箭
@@ -486,6 +509,10 @@ function Standalone.Stop()
         ItemSaveSystem.save(player_, itemDropSystem_)
     end
 
+    if towerManager_ then
+        towerManager_:destroy()
+        towerManager_ = nil
+    end
     if projectileManager_ then
         projectileManager_:destroy()
         projectileManager_ = nil
@@ -499,6 +526,29 @@ function Standalone.Stop()
         mobManager_ = nil
     end
     GameSystems:destroy()
+end
+
+-- ============================================================================
+-- 自动化验收接口（只被 -validate-test 脚本调用，正常玩法不使用）
+-- ============================================================================
+
+---@class DebugGameContext
+---@field scene Scene
+---@field world World
+---@field player Player
+---@field mobManager MobManager
+---@field towerManager TowerManager
+
+---获取当前单机局内对象（供 scripts/devtools/*.lua 断言）
+---@return DebugGameContext
+function GetDebugGameContext()
+    return {
+        scene = scene_,
+        world = world_,
+        player = player_,
+        mobManager = mobManager_,
+        towerManager = towerManager_,
+    }
 end
 
 return Standalone
