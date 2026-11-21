@@ -242,7 +242,7 @@ function PlayerController:applyMovement(moveDir, timeStep)
     local currentPos = player:getPosition()
     
     local BLOCK_SIZE = Config.World.BLOCK_SIZE
-    local PLAYER_SPEED = Config.Player.SPEED
+    local PLAYER_SPEED = Config.Player.SPEED * (player:getSpeedMultiplier() or 1.0)
 
     -- 更新水平速度（用于动画检测）
     velocity.x = moveDir.x * PLAYER_SPEED

@@ -24,6 +24,10 @@ local BlockInteraction = require("player.BlockInteraction")
 local MobManager = require("entity.MobManager")
 local Benchmark = require("devtools.Benchmark")
 local GameSystems = require("core.GameSystems")
+local ItemStack = require("items.ItemStack")
+local ItemDropSystem = require("items.ItemDropSystem")
+local ProjectileManager = require("items.ProjectileManager")
+local ItemSaveSystem = require("items.ItemSaveSystem")
 
 require "urhox-libs.UI.GameHUD"
 
@@ -48,6 +52,10 @@ local playerController_ = nil
 local blockInteraction_ = nil
 ---@type MobManager
 local mobManager_ = nil
+---@type ItemDropSystem|nil
+local itemDropSystem_ = nil
+---@type ProjectileManager|nil
+local projectileManager_ = nil
 ---@type Node
 local cameraNode_ = nil
 ---@type Camera
@@ -75,6 +83,9 @@ local respawnTimer_ = 0.0
 
 -- UI 时间显示节流
 local timeUiTimer_ = 0.0
+
+-- 物品系统存档计时
+local itemSaveTimer_ = 0.0
 
 -- ============================================================================
 -- 初始化
@@ -188,15 +199,51 @@ function Standalone.OnWorldReady()
     blockInteraction_:setTorchDecorator(GameSystems:getTorchDecorator())
     blockInteraction_:setParticleSystem(GameSystems:getParticleSystem())
 
+    -- 物品系统：世界掉落物 + 弓箭投射物
+    itemDropSystem_ = ItemDropSystem.new(scene_, world_)
+    projectileManager_ = ProjectileManager.new(scene_, world_)
+    blockInteraction_:setItemSystems(itemDropSystem_, projectileManager_)
+    blockInteraction_:setCraftingTableHandler(function()
+        GameSystems:openCraftingTable()
+    end)
+
     -- 创建 UI
     GameSystems:createUI("Standalone", player_, function(blockType)
         selectedBlockType_ = blockType
     end)
 
+    -- 背包界面 + 物品系统接线
+    GameSystems:setPlayerController(playerController_)
+    GameSystems:setItemDropSystem(itemDropSystem_)
+    GameSystems:createInventoryUI(player_, {
+        dropSystem = itemDropSystem_,
+        projectiles = projectileManager_,
+    })
+
+    -- 读档；没有存档就给初始装备（生存模式开局）
+    if not ItemSaveSystem.load(player_, itemDropSystem_) then
+        Standalone.giveStartingItems()
+    end
+    local hotbar = GameSystems:getHotbar()
+    if hotbar then
+        hotbar:update()
+    end
+
     -- 创建移动端输入
     GameSystems:createMobileInput({
         on_look = function(deltaYaw, deltaPitch)
             playerController_:applyLookDelta(deltaYaw, deltaPitch)
+        end,
+        -- 背包打开时，触摸/点击不触发挖掘和放置
+        on_tap = function()
+            if not GameSystems:isInventoryOpen() then
+                blockInteraction_:onLeftClick()
+            end
+        end,
+        on_place = function()
+            if not GameSystems:isInventoryOpen() then
+                blockInteraction_:onRightClick()
+            end
         end,
         blockInteraction = blockInteraction_,
         playerController = playerController_,
@@ -211,6 +258,13 @@ function Standalone.OnWorldReady()
 
     -- 创建生物管理器（共享世界生成器的群系数据，保证群系判断与地形一致）
     mobManager_ = MobManager.new(scene_, world_, worldGenerator_.biome)
+
+    -- 生物死亡 → 掉落物品
+    mobManager_.onMobDeath = function(mob)
+        if itemDropSystem_ then
+            itemDropSystem_:dropMobLoot(mob.mobType, mob:getPosition())
+        end
+    end
 
     -- 新加载区块：额外尝试一次「环境原生动物」生成（Design.md）
     chunkStreamer_.onChunkLoaded = function(cx, cz)
@@ -232,6 +286,50 @@ function Standalone.OnWorldReady()
     benchmark_ = Benchmark.new(world_, blockInteraction_, chunkBuilder_, worldGenerator_)
 
     print("=== Minecraft Standalone Ready ===")
+end
+
+---初始装备（没有物品存档时）
+function Standalone.giveStartingItems()
+    if not player_ then
+        return
+    end
+    local inventory = player_:getInventory()
+    if not inventory then
+        return
+    end
+
+    -- 顺序即快捷栏顺序（前 9 件依次落在 1~9 格）
+    ---@type table[]
+    local items = {
+        { "sword", 1 },
+        { "pickaxe", 1 },
+        { "axe", 1 },
+        { "shovel", 1 },
+        { "block:9", 32 },      -- 火把
+        { "apple", 8 },
+        { "block:1", 64 },      -- 草方块
+        { "block:2", 64 },      -- 泥土
+        { "block:3", 64 },      -- 石头
+        { "bow", 1 },
+        { "arrow", 16 },
+        { "bucket", 1 },
+        { "helmet", 1 },
+        { "chestplate", 1 },
+        { "leggings", 1 },
+        { "armguards", 1 },
+        { "block:19", 32 },     -- 木板
+        { "stick", 16 },
+        { "iron_ingot", 16 },
+    }
+
+    for _, entry in ipairs(items) do
+        local stack = ItemStack.new(entry[1], entry[2])
+        if stack then
+            inventory:addStack(stack)
+        end
+    end
+    inventory:markDirty()
+    print("[Standalone] 已发放初始装备")
 end
 
 ---玩家重生
@@ -298,17 +396,33 @@ function HandleUpdate(eventType, eventData)
         mobManager_:update(timeStep, player_, GameSystems:isNight())
     end
 
-    -- 更新玩家血条 + 游戏时间（UI 文本节流到 4Hz，避免每帧触发布局）
+    -- 掉落物 / 拾取 + 弓箭
+    if itemDropSystem_ and player_ then
+        itemDropSystem_:update(timeStep, player_)
+    end
+    if projectileManager_ and mobManager_ then
+        projectileManager_:update(timeStep, mobManager_.mobs)
+    end
+
+    -- 更新玩家血条 / 饥饿 + 游戏时间（UI 文本节流到 4Hz，避免每帧触发布局）
     if player_ then
         local ui = GameSystems:getUIManager()
         if ui then
             ui:setPlayerHealth(player_:getHealth(), player_:getMaxHealth())
+            ui:setPlayerHunger(player_:getHunger(), player_:getMaxHunger())
             timeUiTimer_ = timeUiTimer_ + timeStep
             if timeUiTimer_ >= 0.25 then
                 timeUiTimer_ = 0.0
                 ui:setGameTime(GameSystems:getTimeText())
             end
         end
+    end
+
+    -- 物品自动存档
+    itemSaveTimer_ = itemSaveTimer_ + timeStep
+    if itemSaveTimer_ >= Config.Items.SAVE_INTERVAL then
+        itemSaveTimer_ = 0.0
+        ItemSaveSystem.save(player_, itemDropSystem_)
     end
 
     -- 更新共享子系统
@@ -366,6 +480,20 @@ end
 
 function Standalone.Stop()
     print("[Standalone] Shutting down...")
+
+    -- 退出时保存物品（背包 + 地上的掉落物）
+    if player_ then
+        ItemSaveSystem.save(player_, itemDropSystem_)
+    end
+
+    if projectileManager_ then
+        projectileManager_:destroy()
+        projectileManager_ = nil
+    end
+    if itemDropSystem_ then
+        itemDropSystem_:destroy()
+        itemDropSystem_ = nil
+    end
     if mobManager_ then
         mobManager_:destroy()
         mobManager_ = nil

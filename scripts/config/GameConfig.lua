@@ -104,6 +104,42 @@ GameConfig.MobSpawning = {
 }
 
 -- ============================================
+-- 物品系统配置（Design.md「物品」）
+-- ============================================
+GameConfig.Items = {
+    PICKUP_RADIUS = 3.0,          -- 掉落物拾取半径（世界单位）
+    PICKUP_DELAY = 0.5,           -- 掉落后的拾取冷却（秒）
+    DESPAWN_TIME = 300.0,         -- 掉落物生命周期（秒，MC 默认 5 分钟）
+    MERGE_RADIUS = 1.8,           -- 同类掉落物自动合并半径
+    SAVE_INTERVAL = 10.0,         -- 自动存档间隔（秒）
+    SAVE_FILE = "items_save.json",-- 存档文件名（引擎自动做项目/用户隔离）
+    DROP_THROW_SPEED = 5.0,       -- 玩家丢弃物品时的初速度
+
+    -- 饥饿值（食物行为需要）
+    HUNGER_MAX = 20,              -- 饥饿值上限
+    HUNGER_DRAIN_INTERVAL = 30.0, -- 每多少秒消耗 1 点饥饿值
+    STARVE_DAMAGE_INTERVAL = 4.0, -- 饥饿值为 0 时每隔多少秒掉 1 血
+    STARVE_DAMAGE = 1.0,
+
+    -- 耐久
+    ATTACK_DURABILITY_COST = 1,   -- 每次攻击消耗的武器耐久
+    BLOCK_DURABILITY_COST = 1,    -- 每破坏一个方块消耗的工具耐久
+}
+
+-- 生物掉落物（Design.md：生物死亡产生物品）
+-- id 为物品 ID，min/max 为掉落数量范围
+GameConfig.Loot = {
+    ZOMBIE  = { { id = "rotten_flesh", min = 1, max = 2 } },
+    GHOST   = { { id = "ectoplasm", min = 1, max = 2 }, { id = "string", min = 1, max = 2 } },
+    BOMBER  = { { id = "gunpowder", min = 1, max = 3 } },
+    ARCHER  = { { id = "arrow", min = 2, max = 4 }, { id = "stick", min = 1, max = 2 } },
+    COW     = { { id = "beef", min = 1, max = 2 }, { id = "leather", min = 1, max = 2 } },
+    SHEEP   = { { id = "block:39", min = 1, max = 2 }, { id = "beef", min = 1, max = 1 } },
+    PIG     = { { id = "porkchop", min = 1, max = 2 } },
+    CHICKEN = { { id = "chicken_meat", min = 1, max = 1 }, { id = "feather", min = 1, max = 2 } },
+}
+
+-- ============================================
 -- 区块流式加载配置（无限地形）
 -- ============================================
 GameConfig.Streaming = {

@@ -5,7 +5,7 @@
 
 local Config = require("config.GameConfig")
 local Blocks = require("data.BlockRegistry")
-local Palette = require("data.BlockPalette")
+local Inventory = require("items.Inventory")
 local FirstPersonArm = require("player.FirstPersonArm")
 local PlayerBody = require("player.PlayerBody")
 
@@ -27,9 +27,17 @@ local PlayerBody = require("player.PlayerBody")
 ---@field maxHealth number
 ---@field armor number
 ---@field attack number
+---@field baseArmor number
+---@field baseAttack number
 ---@field dead boolean
 ---@field attackCooldown number
 ---@field invulnTimer number
+---@field inventory Inventory
+---@field hunger number
+---@field maxHunger number
+---@field hungerTimer number
+---@field starveTimer number
+---@field effects table<string, { value: number, time: number }>
 local Player = {}
 Player.__index = Player
 
@@ -75,14 +83,24 @@ function Player.new(scene)
     self.selectedBlockType = Blocks.GRASS
     self.selectedBlockIndex = 1  -- 物品栏索引
 
-    -- 战斗属性
+    -- 战斗属性（护甲 / 攻击力由物品加成动态计算）
     self.health = Config.Player.HEALTH
     self.maxHealth = Config.Player.HEALTH
-    self.armor = Config.Player.ARMOR
-    self.attack = Config.Player.ATTACK
+    self.baseArmor = Config.Player.ARMOR
+    self.baseAttack = Config.Player.ATTACK
+    self.armor = self.baseArmor
+    self.attack = self.baseAttack
     self.dead = false
     self.attackCooldown = 0.0
     self.invulnTimer = Config.MobSpawning.SPAWN_GRACE
+
+    -- 物品系统
+    self.inventory = Inventory.new()
+    self.hunger = Config.Items.HUNGER_MAX
+    self.maxHunger = Config.Items.HUNGER_MAX
+    self.hungerTimer = 0.0
+    self.starveTimer = 0.0
+    self.effects = {}
 
     -- 创建第一人称手臂
     self.firstPersonArm = FirstPersonArm.new(self, scene)
@@ -155,28 +173,67 @@ function Player:selectBlock(blockType)
     self.selectedBlockType = blockType
 end
 
----选择物品栏槽位
----方块列表的唯一真源是 data/BlockPalette.lua（以前这里抄了一份，和 Hotbar 会漂移）
----@param index number 槽位索引（1-11）
----@param blockType number|nil 由 Hotbar 传入的方块类型（含分页信息）；省略时按第 1 页取
-function Player:selectSlot(index, blockType)
-    blockType = blockType or Palette:getBlock(1, index)
-    if blockType then
-        self.selectedBlockIndex = index
-        self.selectedBlockType = blockType
-    end
+---选择快捷栏槽位（1-9）
+---@param index number 槽位索引（1-9）
+---@param _blockType number|nil 兼容旧调用（方块类型由背包里实际物品决定）
+function Player:selectSlot(index, _blockType)
+    index = math.max(1, math.min(9, math.floor(index or 1)))
+    self.selectedBlockIndex = index
 end
 
----获取当前选中的方块类型
+---兼容旧接口
+---@param index number
+function Player:selectHotbar(index)
+    self:selectSlot(index)
+end
+
+---当前选中的物品堆
+---@return ItemStack|nil
+function Player:getSelectedStack()
+    if not self.inventory then
+        return nil
+    end
+    return self.inventory:getHotbarStack(self.selectedBlockIndex)
+end
+
+---获取当前选中的方块类型（选中的不是方块物品时返回 AIR）
 ---@return number 方块类型
 function Player:getSelectedBlockType()
-    return self.selectedBlockType
+    local stack = self:getSelectedStack()
+    local blockId = stack and stack:getBlockId()
+    return blockId or Blocks.AIR
 end
 
----获取当前选中的槽位索引
+---获取当前选中的槽位索引（1-9）
 ---@return number 槽位索引
 function Player:getSelectedSlotIndex()
     return self.selectedBlockIndex
+end
+
+---获取背包
+---@return Inventory
+function Player:getInventory()
+    return self.inventory
+end
+
+---消耗当前选中的物品
+---@param amount integer|nil
+---@return boolean
+function Player:consumeSelected(amount)
+    if not self.inventory then
+        return false
+    end
+    return self.inventory:consumeHotbar(self.selectedBlockIndex, amount or 1)
+end
+
+---消耗当前选中物品的耐久
+---@param amount integer|nil
+function Player:damageSelected(amount)
+    if not self.inventory then
+        return
+    end
+    local index = self.inventory:getHotbarIndex(self.selectedBlockIndex)
+    self.inventory:damageSlot(index, amount or 1)
 end
 
 ---设置速度
@@ -241,6 +298,40 @@ function Player:update(timeStep)
         if self.invulnTimer < 0 then self.invulnTimer = 0 end
     end
 
+    -- 饥饿值：缓慢下降；归零后持续掉血
+    local itemCfg = Config.Items
+    if not self.dead then
+        self.hungerTimer = self.hungerTimer + timeStep
+        if self.hungerTimer >= itemCfg.HUNGER_DRAIN_INTERVAL then
+            self.hungerTimer = self.hungerTimer - itemCfg.HUNGER_DRAIN_INTERVAL
+            if self.hunger > 0 then
+                self.hunger = self.hunger - 1
+            end
+        end
+
+        if self.hunger <= 0 then
+            self.starveTimer = self.starveTimer + timeStep
+            if self.starveTimer >= itemCfg.STARVE_DAMAGE_INTERVAL then
+                self.starveTimer = self.starveTimer - itemCfg.STARVE_DAMAGE_INTERVAL
+                self.health = self.health - itemCfg.STARVE_DAMAGE
+                if self.health <= 0 then
+                    self.health = 0
+                    self.dead = true
+                end
+            end
+        else
+            self.starveTimer = 0.0
+        end
+    end
+
+    -- 药水效果倒计时
+    for kind, effect in pairs(self.effects) do
+        effect.time = effect.time - timeStep
+        if effect.time <= 0 then
+            self.effects[kind] = nil
+        end
+    end
+
     -- 更新第一人称手臂动画
     if self.firstPersonArm then
         self.firstPersonArm:update(timeStep)
@@ -296,18 +387,38 @@ end
 -- 战斗属性（Design.md：伤害 = 攻击力 / 护甲）
 -- ============================================
 
----受击：伤害 = 攻击力 / 护甲
+---受击：伤害 = 攻击力 / 护甲（护甲 = 基础护甲 + 装备加成）
 ---@param rawAttack number 攻击者的攻击力
 function Player:takeDamage(rawAttack)
     if self.dead or self.invulnTimer > 0 then
         return
     end
-    local damage = rawAttack / self.armor
+    local armor = math.max(1.0, self:getArmor())
+    local damage = rawAttack / armor
     self.health = self.health - damage
+
+    -- 护甲承受伤害时掉落耐久
+    if self.inventory then
+        self.inventory:damageEquippedArmor()
+    end
+
     if self.health <= 0 then
         self.health = 0
         self.dead = true
     end
+end
+
+---当前护甲（基础 + 四件装备加成）
+---@return number
+function Player:getArmor()
+    local bonus = self.inventory and self.inventory:getArmorBonus() or 0
+    return self.baseArmor + bonus
+end
+
+---基础护甲
+---@return number
+function Player:getBaseArmor()
+    return self.baseArmor
 end
 
 ---回血
@@ -352,10 +463,18 @@ function Player:getMaxHealth()
     return self.maxHealth
 end
 
----获取攻击力
+---当前攻击力（基础 + 手上武器加成 + 力量药水）
 ---@return number
 function Player:getAttack()
-    return self.attack
+    local bonus = 0
+    if self.inventory then
+        bonus = self.inventory:getHeldAttackBonus(self.selectedBlockIndex)
+    end
+    local strength = self.effects["strength"]
+    if strength then
+        bonus = bonus + strength.value
+    end
+    return self.baseAttack + bonus
 end
 
 ---是否死亡
@@ -364,16 +483,69 @@ function Player:isDead()
     return self.dead
 end
 
----攻击生物（带冷却）
+---攻击生物（带冷却，攻击会消耗武器耐久）
 ---@param mob Mob 目标生物
 ---@return boolean 是否成功攻击
 function Player:attackMob(mob)
     if self.attackCooldown > 0 then
         return false
     end
-    mob:takeDamage(self.attack)
+    mob:takeDamage(self:getAttack())
     self.attackCooldown = Config.Player.ATTACK_COOLDOWN
+    self:damageSelected(Config.Items.ATTACK_DURABILITY_COST)
     return true
+end
+
+-- ============================================
+-- 饥饿 / 食物 / 药水效果
+-- ============================================
+
+---进食：恢复饥饿值和生命
+---@param hunger number 恢复的饥饿值
+---@param healAmount number|nil 恢复的生命
+function Player:eat(hunger, healAmount)
+    self.hunger = math.min(self.maxHunger, self.hunger + (hunger or 0))
+    if healAmount and healAmount > 0 then
+        self:heal(healAmount)
+    end
+end
+
+---@return number
+function Player:getHunger()
+    return self.hunger
+end
+
+---@return number
+function Player:getMaxHunger()
+    return self.maxHunger
+end
+
+---设置饥饿值（存档恢复用）
+---@param value number
+function Player:setHunger(value)
+    self.hunger = math.max(0, math.min(self.maxHunger, value))
+end
+
+---施加药水效果
+---@param kind string "strength"/"speed"
+---@param value number
+---@param duration number 秒
+function Player:applyEffect(kind, value, duration)
+    self.effects[kind] = { value = value, time = duration or 30 }
+end
+
+---当前某种效果的数值（没有则 0）
+---@param kind string
+---@return number
+function Player:getEffectValue(kind)
+    local effect = self.effects[kind]
+    return effect and effect.value or 0
+end
+
+---移动速度倍率（迅捷药水）
+---@return number
+function Player:getSpeedMultiplier()
+    return 1.0 + self:getEffectValue("speed")
 end
 
 -- ============================================
@@ -399,14 +571,24 @@ function Player.fromNode(node, isLocal)
     self.selectedBlockType = Blocks.GRASS
     self.selectedBlockIndex = 1
 
-    -- 战斗属性
+    -- 战斗属性（护甲 / 攻击力由物品加成动态计算）
     self.health = Config.Player.HEALTH
     self.maxHealth = Config.Player.HEALTH
-    self.armor = Config.Player.ARMOR
-    self.attack = Config.Player.ATTACK
+    self.baseArmor = Config.Player.ARMOR
+    self.baseAttack = Config.Player.ATTACK
+    self.armor = self.baseArmor
+    self.attack = self.baseAttack
     self.dead = false
     self.attackCooldown = 0.0
     self.invulnTimer = Config.MobSpawning.SPAWN_GRACE
+
+    -- 物品系统
+    self.inventory = Inventory.new()
+    self.hunger = Config.Items.HUNGER_MAX
+    self.maxHunger = Config.Items.HUNGER_MAX
+    self.hungerTimer = 0.0
+    self.starveTimer = 0.0
+    self.effects = {}
 
     -- 服务器：不创建任何渲染组件
     if IsServerMode() then

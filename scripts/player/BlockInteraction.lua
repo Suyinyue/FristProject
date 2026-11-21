@@ -8,6 +8,9 @@ local Config = require("config.GameConfig")
 local Blocks = require("data.BlockRegistry")
 local BlockState = require("data.BlockState")
 local BlockShapes = require("data.BlockShapes")
+local BlockHarvest = require("data.BlockHarvest")
+local ItemBehaviors = require("items.ItemBehaviors")
+local ItemStack = require("items.ItemStack")
 local Events = require("config.GameEvents")
 
 -- 常量本地化（热路径优化）
@@ -38,6 +41,9 @@ function BlockInteraction.new(player, world, options)
     self.world = world
     self.torchDecorator = nil  -- 火把装饰器引用（由外部设置）
     self.particleSystem = nil  -- 粒子系统引用（由外部设置）
+    self.itemDropSystem = nil  -- 掉落物系统（由外部设置）
+    self.projectiles = nil     -- 弓箭投射物（由外部设置）
+    self.craftingTableHandler = nil -- 右键工作台回调（由外部设置）
     
     -- 网络模式配置
     options = options or {}
@@ -61,6 +67,20 @@ end
 ---@param particleSystem ParticleSystem|nil ParticleSystem实例
 function BlockInteraction:setParticleSystem(particleSystem)
     self.particleSystem = particleSystem
+end
+
+---设置物品系统（掉落物 / 弓箭）
+---@param dropSystem ItemDropSystem|nil
+---@param projectiles ProjectileManager|nil
+function BlockInteraction:setItemSystems(dropSystem, projectiles)
+    self.itemDropSystem = dropSystem
+    self.projectiles = projectiles
+end
+
+---设置右键工作台的回调（打开 3×3 合成界面）
+---@param handler fun()|nil
+function BlockInteraction:setCraftingTableHandler(handler)
+    self.craftingTableHandler = handler
 end
 
 ---设置服务器连接（联机模式）
@@ -195,22 +215,63 @@ function BlockInteraction:onRightClick()
         end
     end
 
-    -- ② 获取目标方块和放置位置
+    -- ①.6 目标是工作台 → 打开 3×3 合成界面
+    if self.craftingTableHandler then
+        local hitX, hitY, hitZ = self:getTargetBlock()
+        if hitX and self.world:getBlock(hitX, hitY, hitZ) == Blocks.CRAFTING_TABLE then
+            self.craftingTableHandler()
+            return true
+        end
+    end
+
+    -- ② 手里拿的不是方块物品 → 走物品行为（食物 / 药水 / 桶 / 弓 / 护甲）
+    local stack = nil
+    if self.player and self.player.getSelectedStack then
+        stack = self.player:getSelectedStack()
+    end
+    if not stack then
+        return false
+    end
+    local def = stack:getDefinition()
+    if not def then
+        return false
+    end
+    if def.behavior ~= "block" then
+        local inventory = self.player:getInventory()
+        local ctx = {
+            player = self.player,
+            stack = stack,
+            slotIndex = inventory:getHotbarIndex(self.player:getSelectedSlotIndex()),
+            blockInteraction = self,
+            projectiles = self.projectiles,
+            world = self.world,
+        }
+        return ItemBehaviors.use(ctx)
+    end
+
+    -- ③ 获取目标方块和放置位置
     local bx, by, bz, prevBx, prevBy, prevBz = self:getTargetBlock()
     if not bx or not prevBx then
         return false
     end
-    
-    -- ③ 获取要放置的方块类型与状态（朝向 / 上下半）
-    local blockType = self.player:getSelectedBlockType()
+
+    -- ④ 获取要放置的方块类型与状态（朝向 / 上下半）
+    local blockType = def.blockId
     local state = self:computePlaceState(blockType, by, prevBy)
 
-    -- ④ 根据模式执行放置逻辑
+    -- ⑤ 根据模式执行放置逻辑
+    local placed
     if self.isNetworkMode then
-        return self:placeBlockNetwork(prevBx, prevBy, prevBz, blockType, state)
+        placed = self:placeBlockNetwork(prevBx, prevBy, prevBz, blockType, state)
     else
-        return self:placeBlockLocal(prevBx, prevBy, prevBz, blockType, state)
+        placed = self:placeBlockLocal(prevBx, prevBy, prevBz, blockType, state)
     end
+
+    -- ⑥ 放置成功消耗 1 个
+    if placed then
+        self.player:consumeSelected(1)
+    end
+    return placed
 end
 
 -- ============================================================================
@@ -241,7 +302,20 @@ function BlockInteraction:destroyBlockLocal(bx, by, bz)
     if self.particleSystem then
         self.particleSystem:spawnBreakParticles(bx, by, bz, blockType)
     end
-    
+
+    -- 掉落物 + 工具耐久（需要的工具不对时仍能破坏，但不掉落）
+    local heldTool = nil
+    if self.player and self.player.getInventory then
+        heldTool = self.player:getInventory():getHeldToolType(self.player:getSelectedSlotIndex())
+    end
+    local canHarvest = BlockHarvest.canHarvest(blockType, heldTool)
+    if self.itemDropSystem then
+        self.itemDropSystem:dropBlock(blockType, bx, by, bz, canHarvest)
+    end
+    if heldTool and self.player.damageSelected then
+        self.player:damageSelected(Config.Items.BLOCK_DURABILITY_COST)
+    end
+
     -- 发送本地事件
     local eventData = VariantMap()
     eventData["X"] = Variant(bx)
@@ -537,6 +611,16 @@ function BlockInteraction:tryDestroyTorch()
             closestTorch.blockY,
             closestTorch.blockZ
         )
+        -- 火把掉落
+        if self.itemDropSystem then
+            local stack = ItemStack.new("block:9", 1)
+            if stack then
+                self.itemDropSystem:spawn(stack, Vector3(
+                    closestTorch.blockX * BLOCK_SIZE + BLOCK_SIZE * 0.5,
+                    closestTorch.blockY * BLOCK_SIZE + BLOCK_SIZE * 0.5,
+                    closestTorch.blockZ * BLOCK_SIZE + BLOCK_SIZE * 0.5))
+            end
+        end
         return true
     end
     

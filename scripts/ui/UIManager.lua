@@ -16,6 +16,7 @@ function UIManager.new()
     local self = setmetatable({}, UIManager)
     self.root = nil
     self.hotbar = nil
+    self.inventoryUI = nil
     self.debugOverlay = nil
     self.initialized = false
     self.gameMode = "Standalone"  -- 默认单机模式
@@ -45,6 +46,12 @@ end
 ---@param debugOverlay table DebugOverlay实例
 function UIManager:setDebugOverlay(debugOverlay)
     self.debugOverlay = debugOverlay
+end
+
+---设置背包界面（物品系统）
+---@param inventoryUI InventoryUI
+function UIManager:setInventoryUI(inventoryUI)
+    self.inventoryUI = inventoryUI
 end
 
 ---构建 UI 树
@@ -137,6 +144,23 @@ function UIManager:build()
                 trackBgColor = {30, 30, 30, 200},
             },
 
+            -- 饥饿值（物品系统：食物恢复饥饿值）
+            UI.Label {
+                id = "player_hunger_label",
+                text = "饥饿 20/20",
+                fontSize = 11,
+                fontColor = {255, 220, 160, 230},
+            },
+
+            UI.ProgressBar {
+                id = "player_hunger_bar",
+                value = 1.0,
+                width = 220,
+                height = 8,
+                fillColor = {230, 170, 60, 255},
+                trackBgColor = {30, 30, 30, 200},
+            },
+
             -- 游戏时间 / 昼夜（生物生成规则跟它挂钩）
             UI.Label {
                 id = "game_time_label",
@@ -156,11 +180,32 @@ function UIManager:build()
 
             UI.Label {
                 id = "instructions",
-                text = "WASD: Move | Space: Jump | LMB: Destroy | RMB: Place",
+                text = "WASD 移动 | 空格 跳跃 | 左键 攻击/挖掘 | 右键 使用/放置 | E 背包 | Q 丢弃",
                 fontSize = 10,
                 fontColor = {255, 255, 255, 140},
                 textAlign = "right",
             },
+        },
+
+        -- 打开背包按钮（移动端没有 E 键）
+        UI.Label {
+            id = "open_inventory_btn",
+            text = "背包 (E)",
+            position = "absolute",
+            top = 34,
+            right = 12,
+            fontSize = 11,
+            fontColor = { 255, 255, 255, 235 },
+            backgroundColor = { 40, 40, 48, 220 },
+            borderRadius = 6,
+            paddingHorizontal = 10,
+            paddingVertical = 5,
+            pointerEvents = "auto",
+            onClick = function()
+                if self.inventoryUI then
+                    self.inventoryUI:toggle()
+                end
+            end,
         },
 
         -- 联机状态指示器 (左上角) - 仅联机模式显示
@@ -215,7 +260,15 @@ function UIManager:build()
             self.root:AddChild(hotbarWidget)
         end
     end
-    
+
+    -- 添加背包界面（默认隐藏，按 E 打开）
+    if self.inventoryUI then
+        local inventoryWidget = self.inventoryUI:build()
+        if inventoryWidget then
+            self.root:AddChild(inventoryWidget)
+        end
+    end
+
     -- 设置根 Widget
     UI.SetRoot(self.root)
     
@@ -274,6 +327,27 @@ function UIManager:setPlayerHealth(health, maxHealth)
     end
 end
 
+---更新玩家饥饿值显示
+---@param hunger number 当前饥饿值
+---@param maxHunger number 最大饥饿值
+function UIManager:setPlayerHunger(hunger, maxHunger)
+    if not self.root then
+        return
+    end
+    local frac = maxHunger > 0 and (hunger / maxHunger) or 0
+    if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+
+    local bar = self.root:FindById("player_hunger_bar") --[[@as ProgressBar]]
+    if bar then
+        bar:SetValue(frac)
+    end
+
+    local label = self.root:FindById("player_hunger_label") --[[@as Label]]
+    if label then
+        label:SetText(string.format("饥饿 %d/%d", math.floor(hunger + 0.5), math.floor(maxHunger + 0.5)))
+    end
+end
+
 ---更新游戏时间显示
 ---@param text string 例如 "07:24  白天"
 function UIManager:setGameTime(text)
@@ -302,6 +376,12 @@ end
 ---@return table|nil
 function UIManager:getDebugOverlay()
     return self.debugOverlay
+end
+
+---获取背包界面
+---@return InventoryUI|nil
+function UIManager:getInventoryUI()
+    return self.inventoryUI
 end
 
 ---销毁 UI

@@ -59,6 +59,7 @@ end
 ---@field spawnTimer number
 ---@field lastNight boolean|nil
 ---@field onChunkLoaded function|nil
+---@field onMobDeath fun(mob: Mob)|nil
 local MobManager = {}
 MobManager.__index = MobManager
 
@@ -507,10 +508,15 @@ function MobManager:update(dt, player, isNight)
         local dz = mp.z - playerPos.z
         local far = (dx * dx + dz * dz) > (cfg.DESPAWN_DISTANCE * cfg.DESPAWN_DISTANCE)
 
-        if mob:isDead() or far then
-            if far and not mob:isDead() then
-                print(string.format("[Mobs] %s despawned (far)", mob.mobType))
+        if mob:isDead() then
+            -- 生物死亡掉落（Design.md：生物死亡产生物品）
+            if self.onMobDeath then
+                self.onMobDeath(mob)
             end
+            mob:destroy()
+            table.remove(self.mobs, i)
+        elseif far then
+            print(string.format("[Mobs] %s despawned (far)", mob.mobType))
             mob:destroy()
             table.remove(self.mobs, i)
         end

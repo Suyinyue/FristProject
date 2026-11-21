@@ -40,6 +40,10 @@ local MobileInputManager = require("ui.MobileInputManager")
 ---@field hotbar Hotbar|nil
 ---@field mobileInput MobileInputManager|nil
 ---@field chunkBuilder ChunkMeshBuilder|nil
+---@field player Player|nil
+---@field playerController PlayerController|nil
+---@field inventoryUI InventoryUI|nil
+---@field itemDropSystem ItemDropSystem|nil
 local GameSystems = {}
 GameSystems.__index = GameSystems
 
@@ -118,18 +122,65 @@ end
 ---@param player Player|nil 玩家实例（Standalone 模式需要）
 ---@param onBlockSelected function|nil 方块选择回调
 function GameSystems:createUI(gameMode, player, onBlockSelected)
+    self.player = player
+
     self.uiManager = UIManager.new()
     self.uiManager:init()
     self.uiManager:setGameMode(gameMode)
-    
+
     -- 创建 Hotbar
     self.hotbar = Hotbar.new(player)
     if onBlockSelected then
         self.hotbar.onBlockSelected = onBlockSelected
     end
-    
+
     self.uiManager:setHotbar(self.hotbar)
     self.uiManager:build()
+end
+
+---设置玩家控制器（打开背包时切换鼠标锁定）
+---@param controller PlayerController
+function GameSystems:setPlayerController(controller)
+    self.playerController = controller
+    if self.inventoryUI then
+        self.inventoryUI:setPlayerController(controller)
+    end
+end
+
+---设置掉落物系统（Q 丢弃需要）
+---@param dropSystem ItemDropSystem
+function GameSystems:setItemDropSystem(dropSystem)
+    self.itemDropSystem = dropSystem
+end
+
+---创建背包界面（在 createUI 之后调用）
+---@param player Player
+---@param options table|nil
+function GameSystems:createInventoryUI(player, options)
+    local InventoryUI = require("ui.InventoryUI")
+    self.inventoryUI = InventoryUI.new(player, options or {})
+    self.inventoryUI:setPlayerController(self.playerController)
+
+    if self.uiManager then
+        self.uiManager:setInventoryUI(self.inventoryUI)
+        local widget = self.inventoryUI:build()
+        if self.uiManager.root then
+            self.uiManager.root:AddChild(widget)
+        end
+    end
+end
+
+---打开 3×3 工作台合成
+function GameSystems:openCraftingTable()
+    if self.inventoryUI then
+        self.inventoryUI:openCraftingTable()
+    end
+end
+
+---背包是否打开
+---@return boolean
+function GameSystems:isInventoryOpen()
+    return self.inventoryUI ~= nil and self.inventoryUI:isOpen()
 end
 
 ---创建移动端输入管理器
@@ -188,6 +239,23 @@ function GameSystems:update(timeStep)
     if self.underwaterOverlay and self.world then
         self.underwaterOverlay:update(self.world)
     end
+
+    -- 物品系统 UI：快捷栏 / 背包界面
+    if self.inventoryUI then
+        self.inventoryUI:update(timeStep)
+    end
+    if self.player and self.player.getInventory then
+        local inventory = self.player:getInventory()
+        if inventory and inventory:isDirty() then
+            if self.hotbar then
+                self.hotbar:update()
+            end
+            if self.inventoryUI then
+                self.inventoryUI:refresh()
+            end
+            inventory:clearDirty()
+        end
+    end
 end
 
 -- ============================================================================
@@ -225,28 +293,38 @@ function GameSystems:handleKeyDown(key)
         return true
     end
     
-    -- Hotbar 选择 (1-0, -)
+    -- 背包（E）
+    if key == KEY_E and self.inventoryUI and self.player and not self.player:isDead() then
+        self.inventoryUI:toggle()
+        if self.hotbar then
+            self.hotbar:update()
+        end
+        return true
+    end
+
+    -- 丢弃（Q / Shift+Q 丢整堆）
+    if key == KEY_Q and self.itemDropSystem and self.player and not self.player:isDead() then
+        if not self:isInventoryOpen() then
+            local count = 1
+            if input:GetQualifierDown(QUAL_SHIFT) then
+                count = 999
+            end
+            self.itemDropSystem:dropFromPlayer(self.player, count)
+            return true
+        end
+    end
+
+    -- 快捷栏选择 (1-9)
     local hotbarKeys = {
         [KEY_1] = 1, [KEY_2] = 2, [KEY_3] = 3, [KEY_4] = 4,
         [KEY_5] = 5, [KEY_6] = 6, [KEY_7] = 7, [KEY_8] = 8,
-        [KEY_9] = 9, [KEY_0] = 10, [KEY_MINUS] = 11,
+        [KEY_9] = 9,
     }
     if hotbarKeys[key] and self.hotbar then
         self.hotbar:selectSlot(hotbarKeys[key])
         return true
     end
 
-    -- Hotbar 翻页（[ / ]）：方块按类别分页（页数见 data/BlockPalette.lua），一页 11 格放不下
-    if self.hotbar then
-        if key == KEY_LEFTBRACKET then
-            self.hotbar:prevPage()
-            return true
-        elseif key == KEY_RIGHTBRACKET then
-            self.hotbar:nextPage()
-            return true
-        end
-    end
-    
     -- ESC 退出
     if key == KEY_ESCAPE then
         engine:Exit()
@@ -265,7 +343,12 @@ function GameSystems:handleMouseButtonDown(button, blockInteraction)
     if VirtualControls.IsMobile() then
         return true
     end
-    
+
+    -- 背包打开时：点击交给 UI，不触发挖掘 / 放置 / 攻击
+    if self:isInventoryOpen() then
+        return true
+    end
+
     if not blockInteraction then
         return false
     end
@@ -315,6 +398,12 @@ function GameSystems:getUIManager()
     return self.uiManager
 end
 
+---获取背包界面
+---@return InventoryUI|nil
+function GameSystems:getInventoryUI()
+    return self.inventoryUI
+end
+
 ---获取昼夜循环实例
 ---@return DayNightCycle|nil
 function GameSystems:getDayNightCycle()
@@ -348,6 +437,11 @@ end
 
 ---销毁所有子系统
 function GameSystems:destroy()
+    if self.inventoryUI then
+        self.inventoryUI:destroy()
+        self.inventoryUI = nil
+    end
+
     if self.mobileInput then
         self.mobileInput:destroy()
         self.mobileInput = nil
