@@ -388,8 +388,9 @@ function MobModel:update(dt, moving, bob)
         arm.pivot.rotation = Quaternion(-swing * arm.sign, 0, 0)
     end
 
-    -- 翅膀扇动
-    self.flapPhase = self.flapPhase + dt * 10.0
+    -- 翅膀扇动（飞行/悬浮时扇得更快，炸弹人起飞后更明显）
+    local flapRate = bob and 16.0 or 10.0
+    self.flapPhase = self.flapPhase + dt * flapRate
     local flap = math.sin(self.flapPhase) * 34
     for _, wing in ipairs(self.wings) do
         wing.pivot.rotation = Quaternion(0, 0, flap * wing.sign)
