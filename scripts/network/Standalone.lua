@@ -329,6 +329,9 @@ function Standalone.OnWorldReady()
 
     -- 生物死亡 → 掉落物品 + 经验
     mobManager_.onMobDeath = function(mob)
+        if mob.hostile then
+            AudioManager.play("enemy_defeat")
+        end
         if itemDropSystem_ and not mob.baby then
             itemDropSystem_:dropMobLoot(mob.mobType, mob:getPosition())
         end

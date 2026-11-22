@@ -3,7 +3,7 @@
 -- 音频管理：背景音乐（BGM）+ 一次性音效（SFX）
 --
 --   资源位于 assets/music/audio/（音效）与 assets/music/back_music/（BGM）。
---   资源路径从资源根写起，因此写成 "music/audio/xxx.mp3"（不带 assets/ 前缀）。
+--   资源路径从资源根写起（不带 assets 前缀），即 assets/music 下的相对路径。
 --
 --   音量模型（见 engine-docs/api/audio.md）：
 --     - BGM 用独立长期 SoundSource，类型 SOUND_MUSIC
@@ -107,9 +107,7 @@ function AudioManager.init(scene)
         return
     end
     scene_ = scene
-    if scene_ then
-        sfxNode_ = scene_:CreateChild("Audio_SFX")
-    end
+    sfxNode_ = scene_:CreateChild("Audio_SFX")
     initialized_ = true
     AudioManager.startMusic()
 end
