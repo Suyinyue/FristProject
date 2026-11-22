@@ -83,6 +83,80 @@ local function tryStepUp(world, player, currentPos, obstacleTop, atX, atZ, testR
     return true
 end
 
+---把玩家从实体方块里推出（修复贴边 / 拐角 / 下落时卡进方块）。
+---轴向分离的碰撞只会「阻止」进入，不会把已经卡进去的身体「推出来」：
+---当玩家在方块边缘、下落、或被台阶吸附后，脚底/身体可能已经和实体方块重叠，
+---这里按 AABB 与实体方块求交，沿最小穿透轴把玩家推出。
+---@param world World
+---@param currentPos Vector3 玩家脚底位置（就地修改）
+---@param r number 碰撞半径（世界单位）
+---@param h number 玩家高度（世界单位）
+local function resolveOverlap(world, currentPos, r, h)
+    local S = BLOCK_SIZE_M
+
+    -- 玩家 AABB（脚在 currentPos，头顶 currentPos.y + h）
+    local px0 = currentPos.x - r
+    local px1 = currentPos.x + r
+    local py0 = currentPos.y
+    local py1 = currentPos.y + h
+    local pz0 = currentPos.z - r
+    local pz1 = currentPos.z + r
+
+    local bx0 = floor(px0 / S)
+    local bx1 = floor(px1 / S)
+    local by0 = floor(py0 / S)
+    local by1 = floor(py1 / S)
+    local bz0 = floor(pz0 / S)
+    local bz1 = floor(pz1 / S)
+
+    for by = by0, by1 do
+        for bx = bx0, bx1 do
+            for bz = bz0, bz1 do
+                -- 用方块中心代表整格实体（半砖/楼梯等形状由 isSolidAtPoint 内部判断）
+                if world:isSolidAtPoint(bx * S + S * 0.5, by * S + S * 0.5, bz * S + S * 0.5) then
+                    local qx0 = bx * S
+                    local qx1 = (bx + 1) * S
+                    local qy0 = by * S
+                    local qy1 = (by + 1) * S
+                    local qz0 = bz * S
+                    local qz1 = (bz + 1) * S
+
+                    local ox = math.min(px1, qx1) - math.max(px0, qx0)
+                    local oy = math.min(py1, qy1) - math.max(py0, qy0)
+                    local oz = math.min(pz1, qz1) - math.max(pz0, qz0)
+                    if ox > 0 and oy > 0 and oz > 0 then
+                        local cx = (px0 + px1) * 0.5
+                        local cy = (py0 + py1) * 0.5
+                        local cz = (pz0 + pz1) * 0.5
+                        local qcx = (qx0 + qx1) * 0.5
+                        local qcy = (qy0 + qy1) * 0.5
+                        local qcz = (qz0 + qz1) * 0.5
+
+                        if ox <= oy and ox <= oz then
+                            if cx < qcx then currentPos.x = currentPos.x - ox
+                            else currentPos.x = currentPos.x + ox end
+                        elseif oy <= oz then
+                            if cy < qcy then currentPos.y = currentPos.y - oy
+                            else currentPos.y = currentPos.y + oy end
+                        else
+                            if cz < qcz then currentPos.z = currentPos.z - oz
+                            else currentPos.z = currentPos.z + oz end
+                        end
+
+                        -- 更新玩家 AABB 后继续处理其它方块
+                        px0 = currentPos.x - r
+                        px1 = currentPos.x + r
+                        py0 = currentPos.y
+                        py1 = currentPos.y + h
+                        pz0 = currentPos.z - r
+                        pz1 = currentPos.z + r
+                    end
+                end
+            end
+        end
+    end
+end
+
 ---@class PlayerController
 ---@field player Player
 ---@field world World
@@ -342,7 +416,10 @@ function PlayerController:applyMovement(moveDir, timeStep)
     else
         currentPos.y = newY
     end
-    
+
+    -- 兜底去穿透：把贴边/拐角/下落时卡进方块的身体推出来
+    resolveOverlap(world, currentPos, playerRadius, playerHeightWorld)
+
     player:setPosition(currentPos)
 end
 

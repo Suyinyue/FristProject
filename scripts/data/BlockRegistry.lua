@@ -775,7 +775,7 @@ BlockRegistry:register(66, "flame_stone", {
     textures = { top = T.flame_stone, side = T.flame_stone, bottom = T.flame_stone },
     hasLight = true,
     lightColor = Color(1.0, 0.55, 0.20),
-    lightRadius = 12,
+    lightRadius = 15,
 })
 
 -- 金刚岩 67：防御塔基座

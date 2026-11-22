@@ -240,7 +240,7 @@ GameConfig.Loot = {
 -- 防御塔（Design.md「建筑」）
 -- ============================================
 GameConfig.Tower = {
-    ATTACK_DAMAGE = 10.0,       -- 攻击伤害（固定 10，Design.md「初始攻击参数」）
+    ATTACK_DAMAGE = 500.0,      -- 攻击伤害（原始攻击力，按 攻击力/护甲 结算）
     ATTACK_INTERVAL = 2.0,      -- 攻击间隔（秒）
     RANGE_PER_LAYER = 3.0,      -- 基座每层提供 3 格攻击范围
     PROJECTILE_SPEED = 10.0,    -- 火焰弹速度（格/秒）

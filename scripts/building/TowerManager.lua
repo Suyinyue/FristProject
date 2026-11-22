@@ -377,8 +377,9 @@ function TowerManager:createTowerLight(tower)
     local light = node:CreateComponent("Light")
     light.lightType = LIGHT_POINT
     light.color = Color(1.0, 0.55, 0.20)
-    light.range = Config.Tower.LIGHT_BASE_RANGE + tower.range * BLOCK_SIZE * 0.5
-    light.brightness = 2.0
+    -- 光罩照亮整片攻击范围（火焰石 blockLight 已照亮方块，这里负责照亮实体/氛围）
+    light.range = Config.Tower.LIGHT_BASE_RANGE + tower.range * BLOCK_SIZE
+    light.brightness = 3.0
     light.castShadows = false
 
     tower.lightNode = node

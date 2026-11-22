@@ -596,7 +596,7 @@ blockId
 - 同一基座放多个火焰石：**只激活层数最多（范围最大）的火焰石**；同层数按坐标固定选一个。
 
 > **已对齐（2026-11-22）**：基座方块改为**圆石**（原金刚岩）；攻击改为**独立火焰弹轨迹**（速度 10 格/秒，命中结算），
-> 攻击间隔 2 秒、攻击伤害 10（`mob:takeDamage(10)`，仍按护甲结算）。
+> 攻击间隔 2 秒、攻击伤害 500（`mob:takeDamage(500)`，按护甲结算）。
 > 仍保留的行为：检测遇缺层会在当前层数停止并按较短塔激活（未实现「中间缺一层整座不激活」）。
 
 ### 8.2 结构检测（TowerManager）
@@ -614,7 +614,7 @@ blockId
 
 - 每 `ATTACK_INTERVAL=2s`：找范围内**最近敌对生物**（3D 距离 ≤ `range * BLOCK_SIZE`）。
 - 锁定目标后发射**独立轨迹火焰弹**（`spawnProjectile`）：自发光小球，速度 `PROJECTILE_SPEED=10` 格/秒，持续追踪目标当前位置，命中判定半径 `PROJECTILE_HIT_RADIUS=0.9` 格。
-- 命中造成 `ATTACK_DAMAGE=10` 伤害（`mob:takeDamage(10)`，按护甲结算）；目标死亡/出范围/失效则重新选目标。
+- 命中造成 `ATTACK_DAMAGE=500` 伤害（`mob:takeDamage(500)`，按护甲结算）；目标死亡/出范围/失效则重新选目标。
 - 视觉：火焰弹 + 塔顶点光源呼吸 + **半透明光罩**（`Sphere.mdl`，半径 = 攻击范围，`SHIELD_ALPHA` 调透明度）。
 - 火焰石方块本身也发光（blockLight 半径 12）。
 - 防御塔重建触发：
@@ -915,7 +915,7 @@ npx -y @taptap/maker preview validate --mode validate \
 
 ### 14.2 防御塔待实现/待对齐（Design.md 最新版）
 
-> 已对齐（2026-11-22）：基座方块 **金刚岩 → 圆石**；攻击间隔 **2 秒**；攻击伤害 **10**（`mob:takeDamage(10)`，按护甲结算）；
+> 已对齐（2026-11-22）：基座方块 **金刚岩 → 圆石**；攻击间隔 **2 秒**；攻击伤害 **500**（`mob:takeDamage(500)`，按护甲结算）；
 > 攻击改为**独立火焰弹轨迹**（速度 10 格/秒、命中判定、追踪目标、目标死亡/出范围重选）。
 > 仍待对齐的点：
 
@@ -931,8 +931,7 @@ npx -y @taptap/maker preview validate --mode validate \
 - 火焰弹：`building/TowerManager.lua`（`spawnProjectile / updateProjectiles`）
 - 测试：扩展 `devtools/TowerCheck.lua`，覆盖上表未覆盖场景
 
-> 注意：`ATTACK_DAMAGE=10` 是**原始攻击力**，仍走 `mob:takeDamage(10)` 的「攻击力/护甲」结算——对 10 护甲的僵尸实际只造成 1 点伤害。
-> 若希望火焰弹每发固定打 10 血，把 `TowerManager:updateProjectiles` 里的 `takeDamage` 改为直接扣血，或调高 `ATTACK_DAMAGE`。
+> 注意：`ATTACK_DAMAGE=500` 是**原始攻击力**，仍走 `mob:takeDamage(500)` 的「攻击力/护甲」结算——对 10 护甲的僵尸每发造成 50 伤害（100 血两发击杀）。
 
 ### 14.3 Design.md「未实现功能」进度
 
@@ -980,7 +979,9 @@ npx -y @taptap/maker preview validate --mode validate \
 - 持续挖掘（`MiningSystem` + `MiningRules`，进度条 + 裂纹 + 掉落进背包）
 - 暂停菜单 / 设置界面（`PauseMenu` + `SettingsManager`，音量/FOV/渲染距离/灵敏度等持久化到 `settings.json`）
 - 世界存档系统（`SaveManager`，区块 RLE + 玩家/生物/掉落/时间/天气，目录 `saves/<World_xxx>/`）
-- 防御塔基座改为圆石 + 攻击改为独立火焰弹轨迹（伤害 10、间隔 2s、速度 10 格/秒）
+- 防御塔基座改为圆石 + 攻击改为独立火焰弹轨迹（伤害 500、间隔 2s、速度 10 格/秒）；点光源照亮整片攻击范围、火焰石 blockLight 提到 15
+- 修复玩家贴边/拐角/下落时卡进方块：`PlayerController` 增加每帧 AABB 去穿透（`resolveOverlap`）
+- 修复背包物品放不进快捷栏的 bug（光标有物品时点击快捷栏格会放入）
 - 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck / DayNightCheck / WeatherCheck / SurvivalCheck / MiningCheck / SaveLoadCheck
 - Git Stop Hook 自动提交/推送（github/dev）
 
