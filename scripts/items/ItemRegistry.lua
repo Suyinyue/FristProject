@@ -16,6 +16,7 @@ local ItemDefinitions = require("data.ItemDefinitions")
 ---@field id string
 ---@field name string
 ---@field icon string|nil
+---@field iconTexture string|nil UI 图标贴图（非方块物品：Textures/items/<id>.png）
 ---@field color number[]
 ---@field category string
 ---@field maxStack integer
@@ -63,6 +64,10 @@ function ItemRegistry:register(def)
     def.category = def.category or "material"
     def.behavior = def.behavior or "material"
     def.description = def.description or ""
+    -- 非方块物品的 UI 图标贴图（方块物品仍用颜色块/方块纹理）
+    if not def.iconTexture and not def.blockId then
+        def.iconTexture = "Textures/items/" .. def.id .. ".png"
+    end
 
     if not VALID_BEHAVIORS[def.behavior] then
         return false, "物品 " .. def.id .. " 的 behavior 未知：" .. tostring(def.behavior)

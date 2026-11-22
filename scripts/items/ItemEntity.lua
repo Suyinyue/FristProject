@@ -10,6 +10,7 @@
 
 local Config = require("config.GameConfig")
 local ItemRegistry = require("items.ItemRegistry")
+local ItemModel = require("items.ItemModel")
 
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
 
@@ -78,28 +79,31 @@ function ItemEntity.new(scene, world, stack, position, pickupDelay)
         cb = def.color[3] or cb
     end
 
-    -- 小方块模型（方块物品压扁一点，普通物品拉长一点，视觉上能区分）
-    local body = self.node:CreateChild("Body")
     local isBlock = stack:isBlock()
-    local sx = isBlock and 0.30 or 0.16
-    local sy = isBlock and 0.30 or 0.36
-    local sz = isBlock and 0.30 or 0.16
-    body.scale = Vector3(sx, sy, sz) * BLOCK_SIZE
-    local model = body:CreateComponent("StaticModel")
-    model.model = cache:GetResource("Model", "Models/Box.mdl")
-    model.material = getMaterial(cr, cg, cb)
+    -- 非方块物品：使用 ItemModel 里程序化拼出的 3D 模型
+    local modelNode = (not isBlock) and ItemModel.createDroppedNode(self.node, stack.id) or nil
+    if not modelNode then
+        -- 方块物品 / 尚无模型的物品：沿用原来的小方块表示
+        local body = self.node:CreateChild("Body")
+        local sx = isBlock and 0.30 or 0.16
+        local sy = isBlock and 0.30 or 0.36
+        local sz = isBlock and 0.30 or 0.16
+        body.scale = Vector3(sx, sy, sz) * BLOCK_SIZE
+        local model = body:CreateComponent("StaticModel")
+        model.model = cache:GetResource("Model", "Models/Box.mdl")
+        model.material = getMaterial(cr, cg, cb)
 
-    -- 普通物品再加一个浅色小部件（看起来像"有造型的物品"）
-    if not isBlock then
-        local accent = self.node:CreateChild("Accent")
-        accent.position = Vector3(0, sy * BLOCK_SIZE * 0.45, 0)
-        accent.scale = Vector3(0.22, 0.08, 0.22) * BLOCK_SIZE
-        local accentModel = accent:CreateComponent("StaticModel")
-        accentModel.model = cache:GetResource("Model", "Models/Box.mdl")
-        accentModel.material = getMaterial(
-            math.min(1.0, cr * 1.3 + 0.15),
-            math.min(1.0, cg * 1.3 + 0.15),
-            math.min(1.0, cb * 1.3 + 0.15))
+        if not isBlock then
+            local accent = self.node:CreateChild("Accent")
+            accent.position = Vector3(0, sy * BLOCK_SIZE * 0.45, 0)
+            accent.scale = Vector3(0.22, 0.08, 0.22) * BLOCK_SIZE
+            local accentModel = accent:CreateComponent("StaticModel")
+            accentModel.model = cache:GetResource("Model", "Models/Box.mdl")
+            accentModel.material = getMaterial(
+                math.min(1.0, cr * 1.3 + 0.15),
+                math.min(1.0, cg * 1.3 + 0.15),
+                math.min(1.0, cb * 1.3 + 0.15))
+        end
     end
 
     return self

@@ -249,23 +249,35 @@ function InventoryUI:refreshSlotWidget(widget, stack, selected, disabled)
 
     if not stack or stack.count <= 0 then
         widget.icon:SetText("")
-        widget.icon:SetStyle({ backgroundColor = { 0, 0, 0, 0 }, fontColor = { 255, 255, 255, 255 } })
+        widget.icon:SetStyle({ backgroundColor = { 0, 0, 0, 0 }, backgroundImage = false,
+            fontColor = { 255, 255, 255, 255 } })
         widget.count:SetText("")
         widget.dur:SetVisible(false)
         return
     end
 
     local def = ItemRegistry:get(stack.id)
-    if stack:isBlock() then
+    if def and def.iconTexture then
+        -- 非方块物品：显示贴图图标
+        widget.icon:SetText("")
+        widget.icon:SetStyle({
+            backgroundColor = { 0, 0, 0, 0 },
+            backgroundImage = def.iconTexture,
+            backgroundFit = "contain",
+            fontColor = { 255, 255, 255, 255 },
+        })
+    elseif stack:isBlock() then
         widget.icon:SetText("")
         widget.icon:SetStyle({
             backgroundColor = def and rgba(def.color) or { 150, 150, 150, 255 },
+            backgroundImage = false,
             fontColor = { 255, 255, 255, 255 },
         })
     else
         widget.icon:SetText(def and def.icon or "?")
         widget.icon:SetStyle({
             backgroundColor = { 0, 0, 0, 0 },
+            backgroundImage = false,
             fontColor = def and brighten(def.color) or { 255, 255, 255, 255 },
         })
     end
@@ -867,13 +879,25 @@ function InventoryUI:refreshCursor()
 
     self.cursorWidget.root:SetVisible(true)
     local def = ItemRegistry:get(stack.id)
-    if stack:isBlock() then
+    if def and def.iconTexture then
         self.cursorWidget.icon:SetText("")
-        self.cursorWidget.icon:SetStyle({ backgroundColor = def and rgba(def.color) or { 150, 150, 150, 255 } })
+        self.cursorWidget.icon:SetStyle({
+            backgroundColor = { 0, 0, 0, 0 },
+            backgroundImage = def.iconTexture,
+            backgroundFit = "contain",
+            fontColor = { 255, 255, 255, 255 },
+        })
+    elseif stack:isBlock() then
+        self.cursorWidget.icon:SetText("")
+        self.cursorWidget.icon:SetStyle({
+            backgroundColor = def and rgba(def.color) or { 150, 150, 150, 255 },
+            backgroundImage = false,
+        })
     else
         self.cursorWidget.icon:SetText(def and def.icon or "?")
         self.cursorWidget.icon:SetStyle({
             backgroundColor = { 0, 0, 0, 0 },
+            backgroundImage = false,
             fontColor = def and brighten(def.color) or { 255, 255, 255, 255 },
         })
     end

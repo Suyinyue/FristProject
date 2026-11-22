@@ -424,6 +424,7 @@ AI 由 `entity/ai/` 的通用框架驱动（参数集中在 `GameConfig.MobAI`�
 | `items/Inventory.lua` | 41 格背包：放入/取出/转移/护甲/武器加成/存档序列化 |
 | `items/ItemBehaviors.lua` | 物品使用策略：食物/药水/护甲/桶/弓 |
 | `items/ItemEntity.lua` | 世界掉落物 3D 实体（重力/悬浮/旋转） |
+| `items/ItemModel.lua` | 非方块物品的程序化 3D 模型数据（掉落物 / 第一人称手持共用） |
 | `items/ItemDropSystem.lua` | 掉落、合并、拾取、生命周期、存档 |
 | `items/ProjectileManager.lua` | 玩家弓箭投射物 |
 | `data/CraftingRecipes.lua` | 20 条配方 |
@@ -437,13 +438,16 @@ AI 由 `entity/ai/` 的通用框架驱动（参数集中在 `GameConfig.MobAI`�
 ### 7.2 物品定义字段
 
 ```lua
-id, name, icon, color, category, maxStack,
+id, name, icon, iconTexture, color, category, maxStack,
 durability, behavior, description,
 attackBonus, armorBonus, equipSlot,
 foodHunger, foodHeal, toolType,
 effect = { kind, value, duration },
 blockId
 ```
+
+- `iconTexture`：UI 图标贴图。非方块物品自动指向 `Textures/items/<id>.png`（由 `scripts/devtools/gen_item_icons.py` 生成），
+  `ui/Hotbar.lua` / `ui/InventoryUI.lua` 优先用它，缺图时才回退到 `icon` 汉字/`color` 色块。
 
 - `behavior`：`material / food / weapon / tool / armor / block / potion / bow / bucket / water_bucket`
 - 护甲：头盔 +60、胸甲 +100、护腿 +30、护臂 +30
@@ -543,6 +547,17 @@ blockId
 - **配方**：在 `CraftingRecipes.recipes` 加条目；方块物品用 `"block:<id>"`。
 - **掉落**：`BlockHarvest.dropFor`（方块）/ `GameConfig.Loot`（生物）。
 - **工具要求**：`BlockHarvest.REQUIRED_TOOL`。
+
+### 7.13 非方块物品的模型与 UI 图标
+
+- **3D 模型**：`items/ItemModel.lua` 用「长方体 / 圆柱 / 八面体」拼出每个非方块物品（颜色顶点 + `Techniques/DiffVCol.xml` 受光材质）。
+  - 地面掉落物：`ItemEntity` 调 `ItemModel.createDroppedNode(parent, itemId)`；没有模型的物品（含方块物品）继续用原来的小方块。
+  - 第一人称：`FirstPersonArm:showHandItem(itemId)` 把同一份模型建进 `handBlockNode` 的 `CustomGeometry`，并按 `ItemModel.getHeldTransform()` 设置缩放/旋转/偏移。
+  - 新增物品要在 `ItemModel.SPECS` 里加数据，否则手持会显示空手、掉落物回退成小方块。
+- **UI 图标**：`assets/Textures/items/<item_id>.png`（32 个非方块物品，64×64 透明 PNG），
+  由 `scripts/devtools/gen_item_icons.py`（Pillow）生成，可改脚本后重新执行。
+  `ItemRegistry` 注册时自动写入 `def.iconTexture`；快捷栏/背包/光标/创造页按贴图显示，缺图回退旧的颜色块/汉字。
+  方块物品暂时仍用颜色块（其真实纹理在 3D 方块/手持方块上）。
 
 ---
 
@@ -802,9 +817,10 @@ npx -y @taptap/maker preview validate --mode validate \
 5. **炸弹人自爆**不产生方块掉落，也不会引发其它炸弹人连锁爆炸。
 6. **护甲只有一套铁甲**；没有木质/石质/钻石工具分级；没有附魔/修理。
 7. **食物只有饥饿值**，没有饱和度和生命恢复机制。
-8. **第一人称手持模型**只对方块物品显示；非方块物品（剑/食物等）只显示手臂。
+8. **第一人称手持模型**：方块物品用真实纹理方块，非方块物品用 `ItemModel` 程序化模型；尚无 `ItemModel.SPECS` 条目的物品只显示手臂。
 9. **多人模式未启用**：Client/Server/Shared 是脚手架；所有新玩法按 Standalone 实现。
-10. **物品图标**是色块/汉字字符，不是图集切图；追求原版图标需要引入图片资源。
+10. **物品图标**：非方块物品已使用 `assets/Textures/items/<id>.png` 贴图；方块物品仍是颜色块（3D 方块本身有纹理）。
+    掉落物的方块物品也仍是颜色小方块，未改成带纹理的迷你方块。
 11. **背包面板固定 800×500**，极窄屏幕上可能偏大；UI 缩放依赖 `UI.Scale.DEFAULT`。
 12. **合成「使用时间/动画」**只有挥臂，没有按物品区分的读条时间。
 
@@ -865,7 +881,8 @@ npx -y @taptap/maker preview validate --mode validate \
 - 矿石系统扩展：新增铜/绿宝石/金刚岩矿/火焰石矿 4 种方块，矿石生成加高度三角分布 + 群系限制
 - 敌对生物夜晚无视距离全量追踪；敌对生成权重每天 ×1.1
 - 防御塔攻击力改为 层数 × 100，新增攻击范围半透明光罩
-- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck
+- 非方块物品补齐 3D 模型（`ItemModel`，掉落 + 第一人称手持）与 UI 图标贴图（`assets/Textures/items/*.png`）
+- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck（视觉）
 - Git Stop Hook 自动提交/推送（github/dev）
 
 ---

@@ -7,11 +7,15 @@ local Config = require("config.GameConfig")
 local Blocks = require("data.BlockRegistry")
 local TextureAtlas = require("rendering.TextureAtlas")
 local TexturePackManager = require("rendering.texturepacks.TexturePackManager")
+local ItemModel = require("items.ItemModel")
 
 ---@class FirstPersonArm
 ---@field player Player
 ---@field cameraNode Node
 ---@field swingDuration number
+---@field currentBlockType integer|nil
+---@field currentItemId string|nil
+---@field handBlockBasePosition Vector3
 local FirstPersonArm = {}
 FirstPersonArm.__index = FirstPersonArm
 
@@ -131,7 +135,8 @@ function FirstPersonArm:createArm()
     -- ============================================
     self.handBlockNode = armNode:CreateChild("HandBlock", LOCAL)
     local blockStart = handStart + handLength + 0.12
-    self.handBlockNode.position = Vector3(0, 0.02, blockStart) * BLOCK_SIZE
+    self.handBlockBasePosition = Vector3(0, 0.02, blockStart) * BLOCK_SIZE
+    self.handBlockNode.position = self.handBlockBasePosition
     self.handBlockNode.scale = Vector3(1, 1, 1)  -- scale 在 CustomGeometry 中处理
     self.handBlockNode.rotation = Quaternion(0, 45, 0)  -- 稍微旋转更好看
 
@@ -206,34 +211,55 @@ function FirstPersonArm:createBlockMaterial(blockType)
     return material
 end
 
----更新手持方块显示（使用真实纹理）
+---更新手持物品显示：方块走真实纹理，非方块物品走 ItemModel 程序化模型
 function FirstPersonArm:updateHandBlock()
     local blockType = self.player:getSelectedBlockType()
     local block = Blocks:get(blockType)
-    
-    if not block or blockType == Blocks.AIR then
-        -- 空气方块时隐藏手持物品
-        if self.handBlockNode then
-            self.handBlockNode.enabled = false
-        end
-        -- 隐藏火把光源
-        self:setTorchLightEnabled(false)
+
+    -- 1) 方块物品（火把等 isItem 方块也在这里处理）
+    if block and blockType ~= Blocks.AIR then
+        self:showHandBlock(blockType, block)
         return
     end
-    
-    -- 显示方块
+
+    -- 2) 非方块物品：剑/工具/食物/护甲/药水…使用 ItemModel
+    local stack = self.player.getSelectedStack and self.player:getSelectedStack() or nil
+    local itemId = (stack and not stack:isBlock()) and stack.id or nil
+    if itemId and ItemModel.hasModel(itemId) then
+        self:showHandItem(itemId)
+        return
+    end
+
+    -- 3) 空手 / 没有模型的物品：隐藏手持节点
     if self.handBlockNode then
-        self.handBlockNode.enabled = true
+        self.handBlockNode.enabled = false
     end
-    
-    -- 只有方块类型改变时才重建几何体
-    if self.currentBlockType == blockType then
+    self:setTorchLightEnabled(false)
+end
+
+---显示手持方块（真实纹理）
+---@param blockType integer
+---@param block table
+function FirstPersonArm:showHandBlock(blockType, block)
+    if not self.handBlockNode then
         return
     end
-    
+    self.handBlockNode.enabled = true
+
+    -- 从物品模型切回来时恢复方块的基础变换
+    self.handBlockNode.position = self.handBlockBasePosition
+    self.handBlockNode.scale = Vector3(1, 1, 1)
+    self.handBlockNode.rotation = Quaternion(0, 45, 0)
+
+    -- 只有方块类型改变时才重建几何体（currentItemId 非空表示当前挂着物品模型）
+    if self.currentBlockType == blockType and not self.currentItemId then
+        return
+    end
+
     print("[FirstPersonArm] Block type changed from", self.currentBlockType, "to", blockType, "name:", block.name)
     self.currentBlockType = blockType
-    
+    self.currentItemId = nil
+
     -- 重新创建 CustomGeometry 组件（确保完全清除旧数据）
     if self.handBlockGeometry then
         self.handBlockNode:RemoveComponent(self.handBlockGeometry)
@@ -241,22 +267,48 @@ function FirstPersonArm:updateHandBlock()
     end
     self.handBlockGeometry = self.handBlockNode:CreateComponent("CustomGeometry", LOCAL)
     self.handBlockGeometry:SetNumGeometries(1)
-    
-    -- 根据物品类型选择不同的渲染方式
+
     if block.isItem then
-        -- 手持物品渲染（如火把）
         self:buildItemGeometry(blockType)
-        -- 如果有光源，启用火把光源
         if block.hasLight then
             self:setTorchLightEnabled(true, block.lightColor, block.lightRadius)
         else
             self:setTorchLightEnabled(false)
         end
     else
-        -- 普通方块渲染
         self:buildBlockGeometry(blockType)
         self:setTorchLightEnabled(false)
     end
+end
+
+---显示手持非方块物品（ItemModel 程序化模型）
+---@param itemId string
+function FirstPersonArm:showHandItem(itemId)
+    if not self.handBlockNode then
+        return
+    end
+    self.handBlockNode.enabled = true
+    self:setTorchLightEnabled(false)
+
+    local t = ItemModel.getHeldTransform(itemId)
+    self.handBlockNode.scale = Vector3(t.scale, t.scale, t.scale)
+    self.handBlockNode.rotation = Quaternion(t.rx, t.ry, t.rz)
+    self.handBlockNode.position = self.handBlockBasePosition + Vector3(t.x, t.y, t.z)
+
+    if self.currentItemId == itemId then
+        return
+    end
+    self.currentItemId = itemId
+    self.currentBlockType = nil
+
+    if self.handBlockGeometry then
+        self.handBlockNode:RemoveComponent(self.handBlockGeometry)
+        self.handBlockGeometry = nil
+    end
+    self.handBlockGeometry = self.handBlockNode:CreateComponent("CustomGeometry", LOCAL)
+    self.handBlockGeometry:SetNumGeometries(1)
+    ItemModel.buildGeometry(self.handBlockGeometry, itemId)
+    self.handBlockGeometry:SetMaterial(0, ItemModel.getMaterial())
 end
 
 ---构建带纹理的方块几何体
