@@ -58,7 +58,10 @@ local function useFood(ctx)
     end
 
     local player = ctx.player
-    player:eat(def.foodHunger or 0, def.foodHeal or 0)
+    local saturation = def.foodSaturation
+        or (Config.FoodSaturation and Config.FoodSaturation[def.id])
+        or 0
+    player:eat(def.foodHunger or 0, def.foodHeal or 0, saturation)
     player:consumeSelected(1)
     player:swingArm()
     print(string.format("[Items] 食用 %s（饥饿 %d/%d）", def.name, player:getHunger(), player:getMaxHunger()))

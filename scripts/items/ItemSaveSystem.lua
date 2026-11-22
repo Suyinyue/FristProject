@@ -44,6 +44,10 @@ function ItemSaveSystem.save(player, dropSystem)
         inventory = inventory:toData(),
         hotbar = player:getSelectedSlotIndex(),
         hunger = player:getHunger(),
+        saturation = player:getSaturation(),
+        level = player:getLevel(),
+        xp = player:getXp(),
+        xpTotal = player:getXpTotal(),
         drops = dropSystem and dropSystem:serialize() or {},
     }
 
@@ -99,6 +103,13 @@ function ItemSaveSystem.load(player, dropSystem)
     end
     if type(data.hunger) == "number" then
         player:setHunger(data.hunger)
+    end
+    if type(data.saturation) == "number" then
+        player:setSaturation(data.saturation)
+    end
+    if type(data.level) == "number" then
+        player:setXp(data.level, type(data.xp) == "number" and data.xp or 0,
+            type(data.xpTotal) == "number" and data.xpTotal or 0)
     end
     if dropSystem and type(data.drops) == "table" then
         dropSystem:restore(data.drops)

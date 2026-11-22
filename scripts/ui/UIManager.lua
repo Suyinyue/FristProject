@@ -161,6 +161,23 @@ function UIManager:build()
                 trackBgColor = {30, 30, 30, 200},
             },
 
+            -- 经验 / 等级
+            UI.Label {
+                id = "player_xp_label",
+                text = "Lv.1  经验 0/7",
+                fontSize = 11,
+                fontColor = {150, 240, 200, 230},
+            },
+
+            UI.ProgressBar {
+                id = "player_xp_bar",
+                value = 0,
+                width = 220,
+                height = 6,
+                fillColor = {70, 220, 150, 255},
+                trackBgColor = {30, 30, 30, 200},
+            },
+
             -- 游戏时间 / 昼夜（生物生成规则跟它挂钩）
             UI.Label {
                 id = "game_time_label",
@@ -330,7 +347,8 @@ end
 ---更新玩家饥饿值显示
 ---@param hunger number 当前饥饿值
 ---@param maxHunger number 最大饥饿值
-function UIManager:setPlayerHunger(hunger, maxHunger)
+---@param saturation number|nil 当前饱和度（可选）
+function UIManager:setPlayerHunger(hunger, maxHunger, saturation)
     if not self.root then
         return
     end
@@ -344,7 +362,35 @@ function UIManager:setPlayerHunger(hunger, maxHunger)
 
     local label = self.root:FindById("player_hunger_label") --[[@as Label]]
     if label then
-        label:SetText(string.format("饥饿 %d/%d", math.floor(hunger + 0.5), math.floor(maxHunger + 0.5)))
+        if saturation and saturation > 0 then
+            label:SetText(string.format("饥饿 %d/%d  饱食 %d",
+                math.floor(hunger + 0.5), math.floor(maxHunger + 0.5), math.floor(saturation + 0.5)))
+        else
+            label:SetText(string.format("饥饿 %d/%d", math.floor(hunger + 0.5), math.floor(maxHunger + 0.5)))
+        end
+    end
+end
+
+---更新经验 / 等级显示
+---@param level integer
+---@param xp number
+---@param xpNext number
+function UIManager:setPlayerXp(level, xp, xpNext)
+    if not self.root then
+        return
+    end
+    local need = math.max(1, xpNext or 1)
+    local frac = xp / need
+    if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+
+    local bar = self.root:FindById("player_xp_bar") --[[@as ProgressBar]]
+    if bar then
+        bar:SetValue(frac)
+    end
+    local label = self.root:FindById("player_xp_label") --[[@as Label]]
+    if label then
+        label:SetText(string.format("Lv.%d  经验 %d/%d",
+            level, math.floor(xp + 0.5), math.floor(need + 0.5)))
     end
 end
 

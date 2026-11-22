@@ -282,7 +282,12 @@ Blocks:getColor(id) / getDisplayName(id) / getPlaceableBlocks()
   - `getAttack()` = `baseAttack(100)` + 手持武器加成（剑 +200）+ 力量药水
   - `takeDamage(rawAttack)`：`damage = rawAttack / max(1, getArmor())`；非无敌/未死亡才结算；受击消耗护甲耐久
   - `attackMob(mob)`：冷却 0.4s，造成 `getAttack()` 伤害，消耗手持武器耐久
-- 饥饿：每 30 秒 -1；为 0 时每 4 秒 -1 血；食物恢复
+- 饥饿 / 饱和度：
+  - 每 30 秒先扣 1 点饱和度，饱和度为 0 再扣 1 点饥饿；饥饿为 0 时每 4 秒 -1 血。
+  - 饥饿 ≥17 且饱和度 >0 时每 4 秒回 1 血并扣 1 点饱和度。
+  - 食物定义/`GameConfig.FoodSaturation` 提供 `foodSaturation`，`Player:eat(hunger, heal, saturation)`。
+  - HUD 饥饿标签同时显示饱食值（`UIManager:setPlayerHunger(..., saturation)`）。
+- 经验 / 等级：`level/xp/xpTotal`；`addXp(n)` 自动连续升级（`getXpForNext`）；击杀生物按 `GameConfig.MobXP` 给经验；HUD `player_xp_bar/label`。
 - 药水效果：`strength`（攻击加成）、`speed`（移动倍率，`PlayerController` 读取）
 - 选中的物品：`getSelectedStack()`；`getSelectedBlockType()` 返回方块 ID 或 `AIR`
 - `consumeSelected(n)` / `damageSelected(n)` → 快捷栏槽位
@@ -399,7 +404,17 @@ AI 由 `entity/ai/` 的通用框架驱动（参数集中在 `GameConfig.MobAI`�
 - 僵尸：腐肉；幽灵：灵质 + 线；炸弹人：火药；弓箭手：箭 + 木棍
 - 牛：牛肉 + 皮革；羊：白色羊毛 + 牛肉；猪：生猪肉；鸡：生鸡肉 + 羽毛
 
-死亡后在 `MobManager:update` 中调用 `onMobDeath`，由 `ItemDropSystem:dropMobLoot` 生成世界掉落物。
+死亡后在 `MobManager:update` 中调用 `onMobDeath`，由 `ItemDropSystem:dropMobLoot` 生成世界掉落物；
+幼体不掉落物品，也不给经验。
+
+### 6.5.1 动物繁殖（Breeding）
+
+- 右键动物（`MOUSEB_RIGHT`）优先尝试喂食：`Config.BreedFood` 定义 小麦→牛/羊、苹果→猪、小麦种子→鸡。
+- 喂食成功后动物进入求偶态（`loveMode`，5 秒）。
+- `MobManager:tryBreedPairs` 每 `CHECK_INTERVAL=1s` 检查：同种、都求偶、距离 ≤4 格、未冷却 →
+  在中点生成幼体（`node.scale=0.5`），双方进入 60 秒冷却。
+- 幼体 `GROW_TIME=240s` 后恢复成年大小；繁殖受 `CATEGORY_CAPS.animal` 上限约束。
+- 状态字段：`Mob.baby / loveMode / loveTimer / breedCooldown / growTimer`。
 
 ### 6.6 新增生物步骤
 
@@ -627,10 +642,24 @@ blockId
 
 ### 9.1 昼夜循环（DayNightCycle）
 
-- 1 游戏天 = `DAY_DURATION=480` 秒；开始时间 `6.2`；阶段 `dawn/day/dusk/night`。
-- 通过切换 `LightGroup/Daytime.xml` / `Night.xml` 与太阳角度实现。
+- 1 游戏天 = `DAY_DURATION=480` 秒；开始时间 `6.2`；阶段 `dawn/day/dusk/night` 只用于 HUD / 生物生成。
+- **视觉是连续渐变**，不再切换 `LightGroup/Daytime.xml` / `Night.xml` 预设：
+  - `Standalone.CreateScene` 保留 Daytime 预设的 Zone（雾/后效基线），禁用其静态天空盒，
+    新增 `ProceduralSky` + `SkyLightCapture`（同 Zone 节点）。
+  - `DayNightCycle` 每帧按太阳高度连续插值天空顶/地平线/地面颜色、太阳颜色/亮度、雾色；
+    日落后日盘 `sunEnergy=0`，方向光切到高处月光方向。
+  - `SkyLightCapture` 实时把天空烘焙成环境光，所以环境光也随天空渐变（无需换预设）。
+  - 天气可通过 `DayNightCycle:setWeatherDarkness(0..1)` 把天空压向灰暗。
 - 生物生成依赖 `GameSystems:isNight()`（僵尸/幽灵夜间）。
 - 调试键：`Y` 正午、`N` 午夜、`L` 60 倍速。
+
+### 9.1.1 天气（WeatherManager）
+
+- `world/WeatherManager.lua`：晴 → 雨/雷雨/雪 → 晴 随机循环；明暗连续过渡（`DARKNESS_*` + `FADE_SPEED`）。
+- 降水是屏幕空间覆盖层 `ui/WeatherOverlay.lua`（雨丝/雪花/闪电闪光，挂在 UI 根节点最底层，不挡 HUD/背包）。
+- 雷雨每隔 `LIGHTNING_INTERVAL_*` 秒落雷：白屏闪光 + 对玩家附近生物造成 `LIGHTNING_DAMAGE`。
+- 雪只出现在山地群系（`BiomeGenerator.MOUNTAINS`）；玩家在遮挡物下方时降水强度降低。
+- 配置见 `GameConfig.Weather`；验收脚本 `devtools/WeatherCheck.lua`。
 
 ### 9.2 HUD
 
@@ -659,10 +688,14 @@ blockId
 | `Player` | 血 100、护甲 10、攻击 100、攻击范围 6、攻击冷却 0.4、重生 2s |
 | `Mobs` | 见 §6.1 |
 | `MobSpawning` | 间隔 2.5s、区块 2~4、最小距离 12、群半径 4、上限 monster12/animal16/总32、消失 220、索敌 20 |
-| `Items` | 拾取 3.0 / 0.5s、合并 1.8、寿命 300s、存档 10s、饥饿 20（30s -1） |
+| `Items` | 拾取 3.0 / 0.5s、合并 1.8、寿命 300s、存档 10s、饥饿 20（30s -1）、饱和度 20、自然回血 4s/1 血 |
+| `FoodSaturation` | 苹果 4、面包 6、生肉 2、腐肉 0（熟肉 6~8） |
+| `XP` / `MobXP` | 升级公式 7+1.2L+0.15L²；僵尸 5 / 幽灵 3 / 炸弹人 8 / 弓箭手 5 / 动物 1~2 |
+| `Breeding` | 求偶 5s、配对 4 格、幼体 0.5 倍、成长 240s、冷却 60s |
+| `Weather` | 晴 240~600s、雨 120~360s、雷雨概率 0.25、明暗过渡 0.35/s |
 | `Tower` | 攻击 500、间隔 1s、每层 3 格、3k 块/层、光束 0.18s |
 | `Streaming` | 生成 3ms/帧、构建 4ms/帧、4 个并行、初始半径 3 |
-| `DayNight` | 1 天 480s、开始 6.2、启用 |
+| `DayNight` | 1 天 480s、开始 6.2、启用；视觉用 ProceduralSky 连续渐变 |
 | `Camera` | FOV 90、远裁剪 500、雾 50~300 |
 | `Features` | 树/植被/小屋默认关闭；RICH_TERRAIN 开启 |
 
@@ -816,7 +849,7 @@ npx -y @taptap/maker preview validate --mode validate \
 4. **弓箭手是「远程直接结算伤害」**，没有箭矢飞行体；玩家的弓才有 `ProjectileManager`。
 5. **炸弹人自爆**不产生方块掉落，也不会引发其它炸弹人连锁爆炸。
 6. **护甲只有一套铁甲**；没有木质/石质/钻石工具分级；没有附魔/修理。
-7. **食物只有饥饿值**，没有饱和度和生命恢复机制。
+7. **饥饿/饱和度已实现**（§5.1）；食物仍保留 `foodHeal` 作为即时小回血，熟肉等扩展食物未新增。
 8. **第一人称手持模型**：方块物品用真实纹理方块，非方块物品用 `ItemModel` 程序化模型；尚无 `ItemModel.SPECS` 条目的物品只显示手臂。
 9. **多人模式未启用**：Client/Server/Shared 是脚手架；所有新玩法按 Standalone 实现。
 10. **物品图标**：非方块物品已使用 `assets/Textures/items/<id>.png` 贴图；方块物品仍是颜色块（3D 方块本身有纹理）。
@@ -867,9 +900,34 @@ npx -y @taptap/maker preview validate --mode validate \
 
 > 在实现这些新需求前，不要把本文档 §8 的 500/1s/光束描述当作最新设计；它以**当前代码**为准，最新设计以 `Design.md` 为准。
 
+### 14.3 Design.md「未实现功能」进度
+
+已实现（2026-11-22）：
+
+| 系统 | 落点 |
+|---|---|
+| 日夜渐变 | `ProceduralSky` + `SkyLightCapture` + `DayNightCycle` 连续插值（§9.1） |
+| 天气（晴/雨/雷雨/雪） | `world/WeatherManager.lua` + `ui/WeatherOverlay.lua`（§9.1.1） |
+| 饥饿与饱和度 | `Player` 饱和度/自然回血 + HUD 饱食值（§5.1） |
+| 经验与等级 | `Player` 经验/等级 + HUD 经验条（§5.1） |
+| 动物繁殖 | 右键喂食 + 求偶 + 幼体成长（§6.5.1） |
+| 矿石生成 | `WorldGenerator.GEO_FEATURES`；`devtools/OreCheck.lua` 验证出生点 64×64 内煤/铁/铜/金刚岩等均有生成 |
+
+仍未实现（按 Design.md 优先级）：
+
+1. **熔炉与烧炼**（新方块 LIT_FURNACE、`FurnaceManager`、`FurnaceUI`、烧炼配方/燃料）
+2. **箱子与容器**（CHEST、`ContainerManager`、`ChestUI`、容器存档）
+3. **附魔**（附魔台、青金石、附魔效果接入攻击/护甲/耐久）
+4. **农业种植**（耕地/小麦作物/种子/锄头、`FarmingManager`、阶段贴图与掉落）
+5. **钓鱼**（钓鱼竿/鱼/浮漂、`FishingManager`、钓获表）
+6. **红石**（拉杆/按钮/红石粉/红石火把/红石灯、信号 BFS）
+
+> 这些系统的数据/模块/接线位置已在 `Design.md`「附：Minecraft 未实现功能」中给出，
+> 新增方块 ID 从 **72** 顺延（当前 72 起仍空闲）。
+
 ---
 
-## 15. 最近实现记录（2026-11-21）
+## 15. 最近实现记录（2026-11-21 ~ 11-22）
 
 - 无限地形流式加载 + 光照 BFS 范围修复，解决加载/行走卡顿
 - 生物多部件模型、朝向 = 移动方向、血条朝向玩家
@@ -882,7 +940,10 @@ npx -y @taptap/maker preview validate --mode validate \
 - 敌对生物夜晚无视距离全量追踪；敌对生成权重每天 ×1.1
 - 防御塔攻击力改为 层数 × 100，新增攻击范围半透明光罩
 - 非方块物品补齐 3D 模型（`ItemModel`，掉落 + 第一人称手持）与 UI 图标贴图（`assets/Textures/items/*.png`）
-- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck（视觉）
+- 日夜改为连续渐变：`ProceduralSky` + `SkyLightCapture`（不再硬切 LightGroup 预设）
+- 新增天气（雨/雷雨/雪 + 屏幕降水 + 落雷）、饥饿饱和度与自然回血、经验等级 HUD、动物喂食繁殖
+- 确认矿石生成有效：`OreCheck` 出生点 64×64 内 coal=691 iron=345 copper=291 adamant=107 gold=51 diamond=11
+- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck / DayNightCheck / WeatherCheck / SurvivalCheck
 - Git Stop Hook 自动提交/推送（github/dev）
 
 ---

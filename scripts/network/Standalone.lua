@@ -30,6 +30,7 @@ local ItemDropSystem = require("items.ItemDropSystem")
 local ProjectileManager = require("items.ProjectileManager")
 local ItemSaveSystem = require("items.ItemSaveSystem")
 local TowerManager = require("building.TowerManager")
+local WeatherManager = require("world.WeatherManager")
 
 require "urhox-libs.UI.GameHUD"
 
@@ -60,6 +61,8 @@ local itemDropSystem_ = nil
 local projectileManager_ = nil
 ---@type TowerManager|nil
 local towerManager_ = nil
+---@type WeatherManager|nil
+local weatherManager_ = nil
 ---@type Node
 local cameraNode_ = nil
 ---@type Camera
@@ -72,6 +75,10 @@ local selectedBlockType_ = 1
 local lightGroup_ = nil
 local zone_ = nil
 local sunLight_ = nil
+---@type ProceduralSky|nil
+local sky_ = nil
+---@type SkyLightCapture|nil
+local skyCapture_ = nil
 
 -- 性能测试
 local benchmark_ = nil
@@ -159,6 +166,32 @@ function Standalone.CreateScene()
         zone_.depthFogStart = Config.Camera.FOG_START
         zone_.depthFogEnd = Config.Camera.FOG_END
     end
+
+    -- 程序化天空 + 实时环境光捕获：
+    --   预设自带的静态天空盒会被 ProceduralSky 替换，昼夜颜色/环境光可以连续渐变，
+    --   不再在 Daytime / Night 两套 LightGroup 之间硬切换。
+    local oldSkybox = lightGroup_:GetComponent("Skybox", true)
+    if oldSkybox then
+        oldSkybox.enabled = false
+    end
+
+    local skyNode = scene_:CreateChild("Sky", LOCAL)
+    sky_ = skyNode:CreateComponent("ProceduralSky")
+    if sky_ and sunLight_ then
+        sky_.sunLight = sunLight_
+    end
+
+    skyCapture_ = lightGroup_:CreateComponent("SkyLightCapture")
+    if skyCapture_ then
+        skyCapture_.updateMode = SKY_CAPTURE_ON_CHANGE
+        skyCapture_.minCaptureInterval = 1.0
+    end
+
+    if zone_ then
+        -- 捕获结果是真实亮度，强度用 1；环境光完全由天空决定
+        zone_.envTextureDiffIntensity = 1.0
+        zone_.envTextureSpecIntensity = 1.0
+    end
 end
 
 function Standalone.OnWorldReady()
@@ -198,6 +231,8 @@ function Standalone.OnWorldReady()
         zone = zone_,
         sunLight = sunLight_,
         sunNode = sunNode,
+        sky = sky_,
+        skyCapture = skyCapture_,
     })
 
     -- 创建方块交互（单机模式）
@@ -275,10 +310,14 @@ function Standalone.OnWorldReady()
     -- 创建生物管理器（共享世界生成器的群系数据，保证群系判断与地形一致）
     mobManager_ = MobManager.new(scene_, world_, worldGenerator_.biome)
 
-    -- 生物死亡 → 掉落物品
+    -- 生物死亡 → 掉落物品 + 经验
     mobManager_.onMobDeath = function(mob)
-        if itemDropSystem_ then
+        if itemDropSystem_ and not mob.baby then
             itemDropSystem_:dropMobLoot(mob.mobType, mob:getPosition())
+        end
+        if player_ and not mob.baby then
+            local xp = Config.MobXP and Config.MobXP[mob.mobType] or 1
+            player_:addXp(xp)
         end
     end
 
@@ -314,6 +353,18 @@ function Standalone.OnWorldReady()
     local ui = GameSystems:getUIManager()
     if ui then
         ui:setPlayerHealth(player_:getHealth(), player_:getMaxHealth())
+    end
+
+    -- 天气系统：晴 / 雨 / 雷雨 / 雪（屏幕空间覆盖层挂在 UI 根节点最底层）
+    if Config.Weather and Config.Weather.ENABLED then
+        weatherManager_ = WeatherManager.new({
+            world = world_,
+            player = player_,
+            mobManager = mobManager_,
+            dayNightCycle = GameSystems:getDayNightCycle(),
+            biome = worldGenerator_.biome,
+            uiRoot = ui and ui:getRoot() or nil,
+        })
     end
 
     -- 创建性能测试工具
@@ -557,6 +608,11 @@ function HandleUpdate(eventType, eventData)
         towerManager_:update(timeStep)
     end
 
+    -- 天气状态 / 明暗过渡 / 降水覆盖层
+    if weatherManager_ then
+        weatherManager_:update(timeStep)
+    end
+
     -- 掉落物 / 拾取 + 弓箭
     if itemDropSystem_ and player_ then
         itemDropSystem_:update(timeStep, player_)
@@ -570,7 +626,9 @@ function HandleUpdate(eventType, eventData)
         local ui = GameSystems:getUIManager()
         if ui then
             ui:setPlayerHealth(player_:getHealth(), player_:getMaxHealth())
-            ui:setPlayerHunger(player_:getHunger(), player_:getMaxHunger())
+            ui:setPlayerHunger(player_:getHunger(), player_:getMaxHunger(), player_:getSaturation())
+            ui:setPlayerXp(player_:getLevel(), player_:getXp(),
+                player_:getXpForNext(player_:getLevel()))
             timeUiTimer_ = timeUiTimer_ + timeStep
             if timeUiTimer_ >= 0.25 then
                 timeUiTimer_ = 0.0
@@ -632,6 +690,15 @@ function HandleMouseButtonDown(eventType, eventData)
         end
     end
 
+    -- 右键：优先尝试喂食动物（繁殖），否则走放置/使用物品
+    if button == MOUSEB_RIGHT and mobManager_ and player_ and not player_:isDead() then
+        local target = mobManager_:findTargetMob(player_)
+        if target and mobManager_:tryFeed(player_, target) then
+            player_:swingArm()
+            return
+        end
+    end
+
     GameSystems:handleMouseButtonDown(button, blockInteraction_)
 end
 
@@ -658,6 +725,8 @@ function Standalone.Stop()
         towerManager_:destroy()
         towerManager_ = nil
     end
+    -- 天气管理器没有持久节点；覆盖层随 UI 根节点一起销毁
+    weatherManager_ = nil
     if projectileManager_ then
         projectileManager_:destroy()
         projectileManager_ = nil
@@ -683,6 +752,7 @@ end
 ---@field player Player
 ---@field mobManager MobManager
 ---@field towerManager TowerManager
+---@field weatherManager WeatherManager|nil
 
 ---获取当前单机局内对象（供 scripts/devtools/*.lua 断言）
 ---@return DebugGameContext
@@ -693,6 +763,7 @@ function GetDebugGameContext()
         player = player_,
         mobManager = mobManager_,
         towerManager = towerManager_,
+        weatherManager = weatherManager_,
     }
 end
 

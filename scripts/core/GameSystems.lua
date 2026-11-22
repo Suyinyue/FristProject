@@ -84,6 +84,8 @@ function GameSystems:init(scene, cameraNode, world, options)
     self.zone = options.zone
     self.sunLight = options.sunLight
     self.sunNode = options.sunNode
+    self.sky = options.sky
+    self.skyCapture = options.skyCapture
     
     -- 创建粒子系统
     self.particleSystem = ParticleSystem.new(scene, world)
@@ -107,6 +109,8 @@ function GameSystems:init(scene, cameraNode, world, options)
             zone = self.zone,
             sunLight = self.sunLight,
             sunNode = self.sunNode,
+            sky = self.sky,
+            skyCapture = self.skyCapture,
             startTime = Config.DayNight.START_TIME,
             dayDuration = Config.DayNight.DAY_DURATION,
             fogStart = Config.Camera.FOG_START,

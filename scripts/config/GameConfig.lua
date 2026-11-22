@@ -160,6 +160,67 @@ GameConfig.Items = {
     -- 耐久
     ATTACK_DURABILITY_COST = 1,   -- 每次攻击消耗的武器耐久
     BLOCK_DURABILITY_COST = 1,    -- 每破坏一个方块消耗的工具耐久
+
+    -- 饱和度（Design.md「自然生命回复与饥饿饱和度」）
+    SATURATION_MAX = 20,          -- 饱和度上限
+    SATURATION_START = 10,        -- 开局饱和度
+    REGEN_INTERVAL = 4.0,         -- 自然回血间隔（秒）
+    REGEN_AMOUNT = 1,             -- 每次自然回血量
+    REGEN_MIN_HUNGER = 17,        -- 饥饿值达到该值才自然回血
+}
+
+-- 生肉/熟肉/食物的饱和度（吃下去先填饱和度，再缓慢回血）
+GameConfig.FoodSaturation = {
+    apple = 4, bread = 6, beef = 2, porkchop = 2, chicken_meat = 2, rotten_flesh = 0,
+    cooked_beef = 8, cooked_porkchop = 8, cooked_chicken = 6,
+}
+
+-- 经验值（Design.md「经验值与等级」）
+GameConfig.XP = {
+    BASE_NEXT = 7,                -- 1 级升 2 级所需经验
+    PER_LEVEL = 1.2,              -- 每级线性增量
+    PER_LEVEL2 = 0.15,            -- 每级二次增量
+    MAX_LEVEL = 100,
+}
+
+-- 生物死亡经验（按 mobType）
+GameConfig.MobXP = {
+    ZOMBIE = 5, GHOST = 3, BOMBER = 8, ARCHER = 5,
+    COW = 2, SHEEP = 2, PIG = 2, CHICKEN = 1,
+}
+
+-- 动物繁殖（Design.md「动物繁殖系统」）
+GameConfig.Breeding = {
+    LOVE_MODE_DURATION = 5.0,     -- 求偶状态持续（秒）
+    BREED_RADIUS = 4.0,           -- 配对距离（格）
+    BABY_SCALE = 0.5,             -- 幼体缩放
+    GROW_TIME = 240.0,            -- 幼体成长时间（秒）
+    BREED_COOLDOWN = 60.0,        -- 繁殖后冷却（秒）
+    CHECK_INTERVAL = 1.0,         -- 配对检查间隔（秒）
+}
+
+-- 繁殖饲料：物品 ID → 可喂养的生物类型
+GameConfig.BreedFood = {
+    wheat = { "COW", "SHEEP" },
+    apple = { "PIG" },
+    wheat_seed = { "CHICKEN" },
+}
+
+-- 天气（Design.md「天气系统」）
+GameConfig.Weather = {
+    ENABLED = true,
+    CLEAR_MIN = 240.0, CLEAR_MAX = 600.0,   -- 晴天持续（秒）
+    RAIN_MIN = 120.0, RAIN_MAX = 360.0,     -- 雨天持续（秒）
+    THUNDER_CHANCE = 0.25,                  -- 下雨时转雷雨的概率
+    LIGHTNING_INTERVAL_MIN = 15.0,
+    LIGHTNING_INTERVAL_MAX = 60.0,
+    DARKNESS_CLEAR = 0.0,
+    DARKNESS_RAIN = 0.35,
+    DARKNESS_THUNDER = 0.55,
+    DARKNESS_SNOW = 0.28,
+    FADE_SPEED = 0.35,                      -- 天气明暗过渡速度（每秒）
+    LIGHTNING_DAMAGE = 1000.0,
+    LIGHTNING_RADIUS = 12.0,                -- 闪电命中判定半径（世界单位）
 }
 
 -- 生物掉落物（Design.md：生物死亡产生物品）

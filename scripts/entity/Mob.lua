@@ -41,6 +41,11 @@ local BLOCK_SIZE = Config.World.BLOCK_SIZE
 ---@field moving boolean
 ---@field airborne boolean
 ---@field yaw number
+---@field baby boolean
+---@field loveMode boolean
+---@field loveTimer number
+---@field breedCooldown number
+---@field growTimer number
 ---@field onExplode fun(mob: Mob, player: Player)|nil
 local Mob = {}
 Mob.__index = Mob
@@ -75,6 +80,13 @@ function Mob.new(scene, world, mobType, spawnPos)
     self.airborne = false
     self.yaw = 0.0
     self.onExplode = nil
+
+    -- 繁殖状态
+    self.baby = false
+    self.loveMode = false
+    self.loveTimer = 0.0
+    self.breedCooldown = 0.0
+    self.growTimer = 0.0
 
     -- AI 控制器（状态机 + 游走/检测/追踪/攻击）
     self.ai = AIController.new(self, world, def)
@@ -136,6 +148,31 @@ function Mob:isDead()
     return self.dead
 end
 
+---设置幼体状态（模型整体缩放，原点在脚下）
+---@param baby boolean
+function Mob:setBaby(baby)
+    self.baby = baby
+    if baby then
+        self.growTimer = Config.Breeding.GROW_TIME
+    else
+        self.growTimer = 0.0
+    end
+    local s = baby and Config.Breeding.BABY_SCALE or 1.0
+    self.node.scale = Vector3(s, s, s)
+end
+
+---是否可以参与繁殖
+---@return boolean
+function Mob:canBreed()
+    return not self.baby and not self.dead and self.breedCooldown <= 0
+end
+
+---进入求偶状态
+function Mob:enterLoveMode()
+    self.loveMode = true
+    self.loveTimer = Config.Breeding.LOVE_MODE_DURATION
+end
+
 ---获取当前位置
 ---@return Vector3
 function Mob:getPosition()
@@ -191,6 +228,24 @@ end
 function Mob:update(dt, player, isNight)
     if self.dead then
         return
+    end
+
+    -- 求偶 / 繁殖冷却 / 幼体成长
+    if self.loveTimer > 0 then
+        self.loveTimer = self.loveTimer - dt
+        if self.loveTimer <= 0 then
+            self.loveTimer = 0.0
+            self.loveMode = false
+        end
+    end
+    if self.breedCooldown > 0 then
+        self.breedCooldown = math.max(0, self.breedCooldown - dt)
+    end
+    if self.baby and self.growTimer > 0 then
+        self.growTimer = self.growTimer - dt
+        if self.growTimer <= 0 then
+            self:setBaby(false)
+        end
     end
 
     local pp = player:getPosition()

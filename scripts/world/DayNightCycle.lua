@@ -1,13 +1,15 @@
 -- ====================================================================
 -- world/DayNightCycle.lua
--- 昼夜循环系统 - 平滑过渡的日/夜光照变化
+-- 昼夜循环系统 - 连续渐变的天空 / 太阳 / 雾 / 环境光
 -- ====================================================================
 --
--- 时段模型:
--- - 日出过渡 (5:00 - 7:00)   → night 插值到 day
--- - 白天稳定 (7:00 - 17:00)  → day 参数
--- - 日落过渡 (17:00 - 19:00) → day 插值到 night
--- - 夜晚稳定 (19:00 - 5:00)  → night 参数 (跨夜处理)
+-- 视觉模型（全部按太阳高度连续插值，没有预设切换的硬跳变）：
+--   - 天空：ProceduralSky 的天顶/地平线颜色
+--   - 雾色：与地平线同色，避免天地接缝
+--   - 太阳：颜色、亮度、角度
+--   - 环境光：SkyLightCapture 实时捕获程序化天空，环境漫反射/反射跟着天空渐变
+--
+-- 时段仅用于 HUD / 生物生成判断（dawn / day / dusk / night），不参与视觉切换。
 --
 -- ====================================================================
 
@@ -16,39 +18,35 @@
 ---@field fogStart number
 ---@field fogEnd number
 ---@field scene Scene
+---@field sky ProceduralSky|nil
+---@field skyCapture SkyLightCapture|nil
+---@field daylight number 当前太阳高度换算出的白天强度 0..1
+---@field weatherDarkness number 天气压暗系数 0..1（由 WeatherManager 写入）
 local DayNightCycle = {}
 DayNightCycle.__index = DayNightCycle
 
 -- ====================================================================
--- 光照参数定义 (简化为日/夜两套)
+-- 颜色关键帧（sRGB，天空色 / 太阳色）
 -- ====================================================================
+local SKY_TOP_NIGHT   = Color(0.02, 0.03, 0.08, 1)
+local SKY_TOP_DAY     = Color(0.25, 0.45, 0.85, 1)
+local SKY_HORIZON_NIGHT = Color(0.06, 0.09, 0.18, 1)
+local SKY_HORIZON_DAY = Color(0.65, 0.75, 0.90, 1)
+local SKY_HORIZON_TWILIGHT = Color(0.95, 0.52, 0.28, 1)
+local GROUND_BOTTOM_NIGHT = Color(0.02, 0.02, 0.03, 1)
+local GROUND_BOTTOM_DAY = Color(0.20, 0.17, 0.13, 1)
+local GROUND_HORIZON_NIGHT = Color(0.05, 0.06, 0.10, 1)
+local GROUND_HORIZON_DAY = Color(0.65, 0.70, 0.78, 1)
+local GROUND_HORIZON_TWILIGHT = Color(0.75, 0.42, 0.22, 1)
 
--- 参数来自 LightGroup/Daytime.xml 和 Night.xml
--- 策略：日夜过渡时切换 LightGroup 预设，环境光/IBL/SH 随预设整套切换（在过渡中点跳变一次）；
---       太阳颜色/亮度、fogColor 这些 live 参数则逐帧平滑插值。
--- 注意：环境光不能在 Lua 层插值——引擎对 PBR/lit 硬下发 cAmbientColor=(0,0,0,0)（Batch.cpp），
---       zone.ambientColor 赋值是 no-op；环境光来自预设里烘焙的 SphericalHarmonicsL2 + Env Spec。
---       要更平滑可离线烘焙 Dawn.xml/Dusk.xml 中间预设，在过渡段切换多个预设逼近。
-local LIGHT_PARAMS = {
-    day = {
-        -- LightGroup 预设名
-        lightGroup = "Daytime",
-        -- Zone 参数 (fogColor 可逐帧插值; ambientColor 由预设 SH 决定，无法 Lua 插值)
-        fogColor = Color(0.5, 0.7, 1.0, 1),
-        -- Light 参数
-        sunColor = Color(1.0, 0.93, 0.9, 1),
-        sunBrightness = 3.0,
-    },
-    night = {
-        -- LightGroup 预设名
-        lightGroup = "Night",
-        -- Zone 参数 (fogColor 可逐帧插值; ambientColor 由预设 SH 决定，无法 Lua 插值)
-        fogColor = Color(0.02, 0.05, 0.1, 1),
-        -- Light 参数
-        sunColor = Color(0.15, 0.42, 0.98, 1),  -- 月光蓝色
-        sunBrightness = 0.8,
-    },
-}
+local SUN_COLOR_NIGHT = Color(0.30, 0.45, 0.85, 1)
+local SUN_COLOR_DAY   = Color(1.00, 0.93, 0.88, 1)
+local SUN_COLOR_TWILIGHT = Color(1.00, 0.48, 0.18, 1)
+
+local SUN_BRIGHTNESS_DAY = 3.0
+local MOON_BRIGHTNESS = 0.10
+local MOON_PITCH = 50          -- 夜间方向光从高处照下（当作月光）
+local SUN_SWITCH_ELEV = 0.03   -- 太阳高度低于此值后，天空不再画日盘
 
 -- ====================================================================
 -- 构造函数
@@ -69,6 +67,10 @@ function DayNightCycle.new(options)
     self.zone = options.zone
     self.sunLight = options.sunLight
     self.sunNode = options.sunNode
+    self.sky = options.sky
+    self.skyCapture = options.skyCapture
+    self.daylight = 1.0
+    self.weatherDarkness = 0.0
     
     -- 时间参数
     self.currentTime = options.startTime or 7.0      -- 游戏时间 (0-24)
@@ -107,6 +109,7 @@ end
 ---@param hour number 时间 (0-24)
 function DayNightCycle:setTime(hour)
     self.currentTime = hour % 24
+    self.currentSunRotation = nil   -- 立即对齐太阳/月亮角度，避免慢速插值追赶
     self:applyCurrentLighting()
 end
 
@@ -114,6 +117,7 @@ end
 ---@param hours number 增加的小时数
 function DayNightCycle:addTime(hours)
     self.currentTime = (self.currentTime + hours) % 24
+    self.currentSunRotation = nil
     self:applyCurrentLighting()
     print(string.format("[DayNight] Time set to %02d:%02d (%s)", 
         math.floor(self.currentTime), 
@@ -227,126 +231,92 @@ end
 -- 光照应用
 -- ====================================================================
 
----应用当前时间的光照参数
-function DayNightCycle:applyCurrentLighting()
-    -- 获取插值信息
-    local phase, fromPhase, toPhase, t = self:getPhaseInfo()
-    local fromParams = LIGHT_PARAMS[fromPhase]
-    local toParams = LIGHT_PARAMS[toPhase]
-    
-    -- 插值并应用
-    self:applyLighting(fromParams, toParams, t)
-end
-
----线性插值辅助函数
----@param a number
----@param b number
----@param t number
+---@param v number
 ---@return number
-local function lerp(a, b, t)
-    return a + (b - a) * t
+local function clamp01(v)
+    if v < 0 then return 0 end
+    if v > 1 then return 1 end
+    return v
 end
 
--- 注意：Urho3D 内置 Quaternion:Slerp(rhs, t) 和 Quaternion:Nlerp(rhs, t, shortestPath)
--- 用于四元数球面插值，避免角度跳变导致的抖动
+---太阳高度：6 点/18 点为 0，正午 1，午夜 -1
+---@return number
+function DayNightCycle:getSunElevation()
+    return math.sin((self.currentTime - 6.0) / 12.0 * math.pi)
+end
 
----切换 LightGroup 预设
----@param presetName string 预设名称 ("Daytime", "Night" 等)
-function DayNightCycle:switchLightGroup(presetName)
-    if not self.scene or not presetName then
-        return false
+---当前白天强度 0..1（供天气/生物系统使用）
+---@return number
+function DayNightCycle:getDaylight()
+    return self.daylight
+end
+
+---天气压暗系数（0 = 晴，1 = 最暗）；由 WeatherManager 每帧写入
+---@param value number
+function DayNightCycle:setWeatherDarkness(value)
+    self.weatherDarkness = math.max(0, math.min(1, value or 0))
+end
+
+---应用当前时间的天空 / 太阳 / 雾（全部连续插值，无预设切换）
+function DayNightCycle:applyCurrentLighting()
+    local elev = self:getSunElevation()
+    local day = clamp01(elev * 3.0)
+    -- 日出/日落权重：太阳贴近地平线时为 1
+    local twilight = clamp01(1.0 - math.abs(elev) * 3.0)
+    self.daylight = day
+
+    local skyTop = SKY_TOP_NIGHT:Lerp(SKY_TOP_DAY, day)
+    local skyHorizon = SKY_HORIZON_NIGHT:Lerp(SKY_HORIZON_DAY, day)
+    skyHorizon = skyHorizon:Lerp(SKY_HORIZON_TWILIGHT, twilight * 0.75)
+    local groundBottom = GROUND_BOTTOM_NIGHT:Lerp(GROUND_BOTTOM_DAY, day)
+    local groundHorizon = GROUND_HORIZON_NIGHT:Lerp(GROUND_HORIZON_DAY, day)
+    groundHorizon = groundHorizon:Lerp(GROUND_HORIZON_TWILIGHT, twilight * 0.6)
+
+    -- 天气压暗：雨天/雷雨把天空压向灰暗，太阳变弱
+    local dark = self.weatherDarkness or 0
+    if dark > 0 then
+        skyTop = skyTop:Lerp(Color(0.14, 0.15, 0.18, 1), dark)
+        skyHorizon = skyHorizon:Lerp(Color(0.32, 0.33, 0.36, 1), dark)
+        groundBottom = groundBottom:Lerp(Color(0.04, 0.04, 0.05, 1), dark)
+        groundHorizon = groundHorizon:Lerp(Color(0.18, 0.18, 0.20, 1), dark)
     end
-    
-    -- 如果已经是当前预设，不切换
-    if self.currentPreset == presetName then
-        return false
+
+    if self.sky then
+        self.sky.skyTopColor = skyTop
+        self.sky.skyHorizonColor = skyHorizon
+        self.sky.groundBottomColor = groundBottom
+        self.sky.groundHorizonColor = groundHorizon
+        -- sunEnergy 随白天强度归零：夜里日盘和光晕自动消失，天空仍保留渐变
+        self.sky.sunEnergy = day
+        self.sky.sunLight = self.sunLight
     end
-    
-    -- 移除旧的 LightGroup
-    if self.lightGroup then
-        self.lightGroup:Remove()
-        self.lightGroup = nil
-    end
-    
-    -- 加载新的 LightGroup（使用 LOCAL 模式）
-    self.lightGroup = self.scene:InstantiateXML("LightGroup/" .. presetName .. ".xml", Vector3.ZERO, Quaternion.IDENTITY, LOCAL)
-    
-    -- 更新组件引用
-    self.zone = self.lightGroup:GetComponent("Zone")
-    local sunNode = self.lightGroup:GetChild("Directional Light")
-    if sunNode then
-        self.sunNode = sunNode
-        self.sunLight = sunNode:GetComponent("Light")
-    end
-    
-    -- 重新应用雾效距离
+
+    -- 雾与地平线同色，避免天地接缝
     if self.zone then
+        self.zone.fogColor = skyHorizon
         self.zone.depthFogStart = self.fogStart
         self.zone.depthFogEnd = self.fogEnd
     end
-    
-    self.currentPreset = presetName
-    print("[DayNight] Switched to LightGroup: " .. presetName)
-    return true
-end
 
----插值并应用光照参数
----@param from table 起始参数
----@param to table 目标参数
----@param t number 插值因子 (0-1)
-function DayNightCycle:applyLighting(from, to, t)
-    -- 确定目标 LightGroup 预设
-    -- 在过渡中点 (t >= 0.5) 时切换到目标预设
-    local targetPreset
-    if t < 0.5 then
-        targetPreset = from.lightGroup
-    else
-        targetPreset = to.lightGroup
-    end
-    
-    -- 切换 LightGroup（如果需要）
-    self:switchLightGroup(targetPreset)
-    
-    -- 应用 Zone 参数
-    if self.zone then
-        -- fogColor 是 live 参数，逐帧平滑插值
-        -- (ambientColor 不在此处理：引擎硬下发 cAmbientColor=0，环境光随 LightGroup 预设整套切换)
-        self.zone.fogColor = from.fogColor:Lerp(to.fogColor, t)
-
-        -- 保持雾效距离不变
-        self.zone.depthFogStart = self.fogStart
-        self.zone.depthFogEnd = self.fogEnd
-    end
-    
-    -- 应用太阳光参数
+    -- 太阳颜色：白天暖白，地平线附近偏橙，夜间转月光蓝
     if self.sunLight then
-        self.sunLight.color = from.sunColor:Lerp(to.sunColor, t)
-        self.sunLight.brightness = lerp(from.sunBrightness, to.sunBrightness, t)
+        local sunColor = SUN_COLOR_NIGHT:Lerp(SUN_COLOR_DAY, day)
+        sunColor = sunColor:Lerp(SUN_COLOR_TWILIGHT, twilight * 0.9)
+        self.sunLight.color = sunColor
+        self.sunLight.brightness = (day * SUN_BRIGHTNESS_DAY + (1.0 - day) * MOON_BRIGHTNESS)
+            * (1.0 - dark * 0.75)
     end
 end
 
 ---计算目标太阳 pitch 角度
+---白天跟随太阳高度；夜间改用高处月光方向（否则方向光会从地下往上照）
 ---@return number pitch 角度
 function DayNightCycle:calculateTargetSunPitch()
-    local hour = self.currentTime
-    local sunPitch
-    
-    if hour >= 6 and hour <= 18 then
-        -- 白天：太阳从东升到西落
-        local dayProgress = (hour - 6) / 12  -- 0 到 1
-        sunPitch = math.sin(dayProgress * math.pi) * 60 + 10  -- 10° 到 70° 再到 10°
-    else
-        -- 夜间：太阳在地平线以下
-        local nightProgress
-        if hour > 18 then
-            nightProgress = (hour - 18) / 12  -- 18:00 开始
-        else
-            nightProgress = (hour + 6) / 12   -- 从 0:00 继续
-        end
-        sunPitch = -10 - math.sin(nightProgress * math.pi) * 30  -- 地平线以下
+    local elev = self:getSunElevation()
+    if elev > SUN_SWITCH_ELEV then
+        return elev * 70.0
     end
-    
-    return sunPitch
+    return MOON_PITCH
 end
 
 ---更新太阳节点旋转（使用平滑插值避免抖动）

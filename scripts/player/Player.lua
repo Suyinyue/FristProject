@@ -37,6 +37,12 @@ local PlayerBody = require("player.PlayerBody")
 ---@field maxHunger number
 ---@field hungerTimer number
 ---@field starveTimer number
+---@field saturation number
+---@field maxSaturation number
+---@field regenTimer number
+---@field level integer
+---@field xp number
+---@field xpTotal number
 ---@field effects table<string, { value: number, time: number }>
 local Player = {}
 Player.__index = Player
@@ -100,7 +106,15 @@ function Player.new(scene)
     self.maxHunger = Config.Items.HUNGER_MAX
     self.hungerTimer = 0.0
     self.starveTimer = 0.0
+    self.saturation = Config.Items.SATURATION_START or 10
+    self.maxSaturation = Config.Items.SATURATION_MAX or 20
+    self.regenTimer = 0.0
     self.effects = {}
+
+    -- 经验 / 等级
+    self.level = 1
+    self.xp = 0
+    self.xpTotal = 0
 
     -- 创建第一人称手臂
     self.firstPersonArm = FirstPersonArm.new(self, scene)
@@ -298,15 +312,30 @@ function Player:update(timeStep)
         if self.invulnTimer < 0 then self.invulnTimer = 0 end
     end
 
-    -- 饥饿值：缓慢下降；归零后持续掉血
+    -- 饥饿 / 饱和度：先消耗饱和度，再消耗饥饿值；归零后持续掉血
     local itemCfg = Config.Items
     if not self.dead then
         self.hungerTimer = self.hungerTimer + timeStep
         if self.hungerTimer >= itemCfg.HUNGER_DRAIN_INTERVAL then
             self.hungerTimer = self.hungerTimer - itemCfg.HUNGER_DRAIN_INTERVAL
-            if self.hunger > 0 then
+            if self.saturation > 0 then
+                self.saturation = math.max(0, self.saturation - 1)
+            elseif self.hunger > 0 then
                 self.hunger = self.hunger - 1
             end
+        end
+
+        -- 饥饿值足够 + 有饱和度 → 缓慢自然回血（同时消耗饱和度）
+        if self.hunger >= (itemCfg.REGEN_MIN_HUNGER or 17)
+            and self.saturation > 0 and self.health < self.maxHealth then
+            self.regenTimer = self.regenTimer + timeStep
+            if self.regenTimer >= itemCfg.REGEN_INTERVAL then
+                self.regenTimer = self.regenTimer - itemCfg.REGEN_INTERVAL
+                self.health = math.min(self.maxHealth, self.health + (itemCfg.REGEN_AMOUNT or 1))
+                self.saturation = math.max(0, self.saturation - 1)
+            end
+        else
+            self.regenTimer = 0.0
         end
 
         if self.hunger <= 0 then
@@ -500,11 +529,15 @@ end
 -- 饥饿 / 食物 / 药水效果
 -- ============================================
 
----进食：恢复饥饿值和生命
+---进食：恢复饥饿值、饱和度和少量生命
 ---@param hunger number 恢复的饥饿值
 ---@param healAmount number|nil 恢复的生命
-function Player:eat(hunger, healAmount)
+---@param saturation number|nil 恢复的饱和度
+function Player:eat(hunger, healAmount, saturation)
     self.hunger = math.min(self.maxHunger, self.hunger + (hunger or 0))
+    if saturation and saturation > 0 then
+        self.saturation = math.min(self.maxSaturation, self.saturation + saturation)
+    end
     if healAmount and healAmount > 0 then
         self:heal(healAmount)
     end
@@ -513,6 +546,75 @@ end
 ---@return number
 function Player:getHunger()
     return self.hunger
+end
+
+---@return number
+function Player:getSaturation()
+    return self.saturation
+end
+
+---@param value number
+function Player:setSaturation(value)
+    self.saturation = math.max(0, math.min(self.maxSaturation, value))
+end
+
+-- ============================================
+-- 经验 / 等级
+-- ============================================
+
+---升到下一级所需经验
+---@param level integer
+---@return integer
+function Player:getXpForNext(level)
+    local cfg = Config.XP
+    local n = math.floor((cfg.BASE_NEXT or 7) + level * (cfg.PER_LEVEL or 1.2)
+        + level * level * (cfg.PER_LEVEL2 or 0.15))
+    return math.max(1, n)
+end
+
+---增加经验，自动处理连续升级
+---@param amount number
+function Player:addXp(amount)
+    if not amount or amount <= 0 then
+        return
+    end
+    self.xp = self.xp + amount
+    self.xpTotal = self.xpTotal + amount
+    local maxLevel = Config.XP.MAX_LEVEL or 100
+    while self.level < maxLevel do
+        local need = self:getXpForNext(self.level)
+        if self.xp < need then
+            break
+        end
+        self.xp = self.xp - need
+        self.level = self.level + 1
+        print(string.format("[XP] 升级到 Lv.%d", self.level))
+    end
+end
+
+---@return integer
+function Player:getLevel()
+    return self.level
+end
+
+---@return number
+function Player:getXp()
+    return self.xp
+end
+
+---@return number
+function Player:getXpTotal()
+    return self.xpTotal
+end
+
+---存档恢复
+---@param level integer
+---@param xp number
+---@param xpTotal number|nil
+function Player:setXp(level, xp, xpTotal)
+    self.level = math.max(1, math.floor(level or 1))
+    self.xp = math.max(0, xp or 0)
+    self.xpTotal = math.max(0, xpTotal or self.xp)
 end
 
 ---@return number
@@ -588,7 +690,15 @@ function Player.fromNode(node, isLocal)
     self.maxHunger = Config.Items.HUNGER_MAX
     self.hungerTimer = 0.0
     self.starveTimer = 0.0
+    self.saturation = Config.Items.SATURATION_START or 10
+    self.maxSaturation = Config.Items.SATURATION_MAX or 20
+    self.regenTimer = 0.0
     self.effects = {}
+
+    -- 经验 / 等级
+    self.level = 1
+    self.xp = 0
+    self.xpTotal = 0
 
     -- 服务器：不创建任何渲染组件
     if IsServerMode() then

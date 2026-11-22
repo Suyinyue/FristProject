@@ -60,6 +60,7 @@ end
 ---@field spawnTimer number
 ---@field lastNight boolean|nil
 ---@field dayCount number
+---@field _breedTimer number
 ---@field onChunkLoaded function|nil
 ---@field onMobDeath fun(mob: Mob)|nil
 ---@field onBlocksCleared fun(cleared: table[])|nil
@@ -82,6 +83,7 @@ function MobManager.new(scene, world, biome)
     self.spawnTimer = Config.MobSpawning.SPAWN_INTERVAL
     self.lastNight = nil
     self.dayCount = 0
+    self._breedTimer = 0.0
     self.onBlocksCleared = nil
     self.onExplosionEffect = nil
     self.mobExplodeCallback = function(mob, player)
@@ -249,6 +251,100 @@ function MobManager:spawnMobAt(mobType, bx, gh, bz)
     mob.onExplode = self.mobExplodeCallback
     self.mobs[#self.mobs + 1] = mob
     return mob
+end
+
+-- ====================================================================
+-- 动物繁殖（Design.md「动物繁殖系统」）
+-- ====================================================================
+
+---右键喂食：让动物进入求偶状态
+---@param player Player
+---@param mob Mob
+---@return boolean handled
+function MobManager:tryFeed(player, mob)
+    if not player or not mob or mob:isDead() then
+        return false
+    end
+    local def = Config.Mobs[mob.mobType]
+    if not def or def.hostile then
+        return false
+    end
+    if mob.baby or mob.loveMode or mob.breedCooldown > 0 then
+        return false
+    end
+
+    local stack = player:getSelectedStack()
+    if not stack then
+        return false
+    end
+    local allowed = Config.BreedFood and Config.BreedFood[stack.id]
+    if not allowed then
+        return false
+    end
+    local matched = false
+    for _, t in ipairs(allowed) do
+        if t == mob.mobType then
+            matched = true
+            break
+        end
+    end
+    if not matched then
+        return false
+    end
+
+    player:consumeSelected(1)
+    mob:enterLoveMode()
+    print(string.format("[Breeding] %s 进入求偶状态", def.name))
+    return true
+end
+
+---周期性给相邻的两只求偶动物生成幼体
+function MobManager:tryBreedPairs()
+    local cfg = Config.Breeding
+    local caps = Config.MobSpawning.CATEGORY_CAPS
+    local animalCount = 0
+    for _, m in ipairs(self.mobs) do
+        if m.def and m.def.category == "animal" and not m:isDead() then
+            animalCount = animalCount + 1
+        end
+    end
+    if animalCount >= (caps.animal or 16) then
+        return
+    end
+
+    local radius = cfg.BREED_RADIUS * BLOCK_SIZE
+    local radius2 = radius * radius
+    for i = 1, #self.mobs do
+        local a = self.mobs[i]
+        if a and not a:isDead() and a.loveMode and a:canBreed()
+            and a.def and not a.def.hostile then
+            for j = i + 1, #self.mobs do
+                local b = self.mobs[j]
+                if b and not b:isDead() and b.loveMode and b:canBreed()
+                    and b.mobType == a.mobType then
+                    local pa, pb = a:getPosition(), b:getPosition()
+                    local dx, dz = pa.x - pb.x, pa.z - pb.z
+                    if dx * dx + dz * dz <= radius2 then
+                        local mx = (pa.x + pb.x) * 0.5
+                        local mz = (pa.z + pb.z) * 0.5
+                        local bx = math.floor(mx / BLOCK_SIZE)
+                        local bz = math.floor(mz / BLOCK_SIZE)
+                        local gh = self.world:getGroundHeight(bx, bz)
+                        local baby = self:spawnMobAt(a.mobType, bx, gh, bz)
+                        baby:setBaby(true)
+                        a.loveMode = false
+                        a.loveTimer = 0
+                        a.breedCooldown = cfg.BREED_COOLDOWN
+                        b.loveMode = false
+                        b.loveTimer = 0
+                        b.breedCooldown = cfg.BREED_COOLDOWN
+                        print(string.format("[Breeding] 生成幼体 %s", a.def.name))
+                        return
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- ====================================================================
@@ -598,6 +694,13 @@ end
 function MobManager:update(dt, player, isNight)
     local cfg = Config.MobSpawning
     local playerPos = player:getPosition()
+
+    -- 动物繁殖配对（低频检查）
+    self._breedTimer = self._breedTimer + dt
+    if self._breedTimer >= (Config.Breeding.CHECK_INTERVAL or 1.0) then
+        self._breedTimer = 0.0
+        self:tryBreedPairs()
+    end
 
     -- 更新所有生物 + 清理死亡/过远
     for i = #self.mobs, 1, -1 do
