@@ -181,10 +181,42 @@ function GameSystems:openCraftingTable()
     end
 end
 
----背包是否打开
+---注册容器类界面（熔炉/箱子/附魔台），统一管理打开状态与更新
+---@param ... table 一个或多个容器 UI
+function GameSystems:registerContainerUI(...)
+    self.containerUIs = self.containerUIs or {}
+    for _, ui in ipairs({ ... }) do
+        self.containerUIs[#self.containerUIs + 1] = ui
+    end
+end
+
+---背包或任一容器界面是否打开
 ---@return boolean
 function GameSystems:isInventoryOpen()
-    return self.inventoryUI ~= nil and self.inventoryUI:isOpen()
+    if self.inventoryUI and self.inventoryUI:isOpen() then
+        return true
+    end
+    return self:isContainerOpen()
+end
+
+---是否有容器界面（熔炉/箱子/附魔台）打开
+---@return boolean
+function GameSystems:isContainerOpen()
+    for _, ui in ipairs(self.containerUIs or {}) do
+        if ui:isOpen() then
+            return true
+        end
+    end
+    return false
+end
+
+---关闭所有容器界面
+function GameSystems:closeContainerUIs()
+    for _, ui in ipairs(self.containerUIs or {}) do
+        if ui:isOpen() then
+            ui:close()
+        end
+    end
 end
 
 ---创建移动端输入管理器
@@ -247,6 +279,9 @@ function GameSystems:update(timeStep)
     -- 物品系统 UI：快捷栏 / 背包界面
     if self.inventoryUI then
         self.inventoryUI:update(timeStep)
+    end
+    for _, ui in ipairs(self.containerUIs or {}) do
+        ui:update(timeStep)
     end
     if self.player and self.player.getInventory then
         local inventory = self.player:getInventory()
@@ -443,6 +478,13 @@ function GameSystems:destroy()
     if self.inventoryUI then
         self.inventoryUI:destroy()
         self.inventoryUI = nil
+    end
+
+    if self.containerUIs then
+        for _, ui in ipairs(self.containerUIs) do
+            ui:destroy()
+        end
+        self.containerUIs = {}
     end
 
     if self.mobileInput then

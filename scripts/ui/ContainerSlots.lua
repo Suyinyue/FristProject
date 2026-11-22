@@ -292,4 +292,25 @@ function ContainerSlots.refreshCursor(cursor)
     widget.count:SetText(stack.count > 1 and tostring(stack.count) or "")
 end
 
+---容器界面打开/关闭时切换鼠标模式（与背包一致）
+---@param playerController table|nil
+---@param open boolean
+function ContainerSlots.applyMouseMode(playerController, open)
+    local platform = GetPlatform()
+    local isMobile = platform == "Android" or platform == "iOS"
+    if playerController then
+        playerController:setMouseLocked(isMobile and false or not open)
+    end
+    if isMobile then
+        return
+    end
+    if open then
+        input.mouseMode = MM_ABSOLUTE
+        input:SetMouseVisible(true)
+    else
+        input.mouseMode = MM_RELATIVE
+        input:SetMouseVisible(false)
+    end
+end
+
 return ContainerSlots

@@ -202,6 +202,101 @@ local function useBow(ctx)
 end
 
 -- ====================================================================
+-- 锄头（耕地）
+-- ====================================================================
+
+---@param ctx table
+---@return boolean
+local function useHoe(ctx)
+    local bi = ctx.blockInteraction
+    if not bi then
+        return false
+    end
+    local bx, by, bz = bi:getTargetBlock()
+    if not bx then
+        return false
+    end
+    local block = ctx.world:getBlock(bx, by, bz)
+    if block ~= Blocks.DIRT and block ~= Blocks.GRASS then
+        return false
+    end
+    ctx.world:setBlock(bx, by, bz, Blocks.FARMLAND)
+    ctx.player:damageSelected(1)
+    ctx.player:swingArm()
+    print("[Farming] 耕地")
+    return true
+end
+
+-- ====================================================================
+-- 小麦种子（在耕地上种植）
+-- ====================================================================
+
+---@param ctx table
+---@return boolean
+local function useSeed(ctx)
+    local bi = ctx.blockInteraction
+    if not bi then
+        return false
+    end
+    local bx, by, bz = bi:getTargetBlock()
+    if not bx then
+        return false
+    end
+    if ctx.world:getBlock(bx, by, bz) ~= Blocks.FARMLAND then
+        return false
+    end
+    if by + 1 >= Config.World.WORLD_HEIGHT then
+        return false
+    end
+    if ctx.world:getBlock(bx, by + 1, bz) ~= Blocks.AIR then
+        return false
+    end
+    ctx.world:setBlock(bx, by + 1, bz, Blocks.WHEAT_CROP, 0)
+    -- 种植是直接 setBlock，绕过 placeBlock 的 notifyBlockChanged，这里显式登记作物
+    if ctx.farming then
+        ctx.farming:registerCrop(bx, by + 1, bz)
+    end
+    ctx.player:consumeSelected(1)
+    ctx.player:swingArm()
+    print("[Farming] 种植小麦")
+    return true
+end
+
+-- ====================================================================
+-- 钓鱼竿
+-- ====================================================================
+
+---@param ctx table
+---@return boolean
+local function useFishingRod(ctx)
+    local fishing = ctx.fishing
+    if not fishing then
+        return false
+    end
+    if fishing:isCasting() then
+        fishing:reel()
+        ctx.player:damageSelected(Config.Fishing.ROD_DURABILITY_COST or 1)
+        ctx.player:swingArm()
+        return true
+    end
+
+    local bi = ctx.blockInteraction
+    if not bi then
+        return false
+    end
+    local bx, by, bz = bi:getTargetBlock()
+    if not bx then
+        return false
+    end
+    if ctx.world:getBlock(bx, by, bz) ~= Blocks.WATER then
+        return false
+    end
+    fishing:cast(bx, by, bz)
+    ctx.player:swingArm()
+    return true
+end
+
+-- ====================================================================
 -- 分发
 -- ====================================================================
 
@@ -229,6 +324,12 @@ function ItemBehaviors.use(ctx)
         return useWaterBucket(ctx)
     elseif def.behavior == "bow" then
         return useBow(ctx)
+    elseif def.behavior == "fishing_rod" then
+        return useFishingRod(ctx)
+    elseif def.toolType == "hoe" then
+        return useHoe(ctx)
+    elseif def.id == "wheat_seed" then
+        return useSeed(ctx)
     end
 
     -- material / weapon / tool / block：右键无特殊行为

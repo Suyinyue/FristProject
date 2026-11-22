@@ -615,6 +615,17 @@ function Player:getXpTotal()
     return self.xpTotal
 end
 
+---消耗等级（附魔用）。等级不足返回 false。
+---@param n integer
+---@return boolean
+function Player:spendLevels(n)
+    if self.level < n then
+        return false
+    end
+    self.level = math.max(1, self.level - n)
+    return true
+end
+
 ---存档恢复
 ---@param level integer
 ---@param xp number

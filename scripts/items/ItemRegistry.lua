@@ -64,8 +64,10 @@ function ItemRegistry:register(def)
     def.category = def.category or "material"
     def.behavior = def.behavior or "material"
     def.description = def.description or ""
-    -- 非方块物品的 UI 图标贴图（方块物品仍用颜色块/方块纹理）
-    if not def.iconTexture and not def.blockId then
+    -- 非方块物品的 UI 图标贴图（方块物品仍用颜色块/方块纹理）。
+    -- iconTexture == false 表示「明确不要贴图」，回退到 icon 字符 + color 色块；
+    -- nil 则按约定自动指向 Textures/items/<id>.png。
+    if def.iconTexture == nil and not def.blockId then
         def.iconTexture = "Textures/items/" .. def.id .. ".png"
     end
 

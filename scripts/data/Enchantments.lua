@@ -11,7 +11,7 @@
 
 local Enchantments = {}
 
----@type table<string, { name: string, max: integer, applies: string[], description: string }>
+---@type table<string, table>
 Enchantments.list = {
     sharpness = {
         name = "锋利",
@@ -37,6 +37,13 @@ Enchantments.list = {
 Enchantments.ids = {}
 for id in pairs(Enchantments.list) do
     Enchantments.ids[#Enchantments.ids + 1] = id
+end
+
+---按 ID 取附魔定义
+---@param id string
+---@return table|nil
+function Enchantments.get(id)
+    return Enchantments.list[id]
 end
 
 ---附魔效果数值（给 Inventory 计算加成用）

@@ -36,6 +36,15 @@ local PauseMenu = require("ui.PauseMenu")
 local SettingsManager = require("save.SettingsManager")
 local SaveManager = require("save.SaveManager")
 local AudioManager = require("core.AudioManager")
+local FurnaceManager = require("items.FurnaceManager")
+local ContainerManager = require("items.ContainerManager")
+local EnchantingManager = require("items.EnchantingManager")
+local FarmingManager = require("items.FarmingManager")
+local FishingManager = require("items.FishingManager")
+local RedstoneManager = require("items.RedstoneManager")
+local FurnaceUI = require("ui.FurnaceUI")
+local ChestUI = require("ui.ChestUI")
+local EnchantingUI = require("ui.EnchantingUI")
 
 require "urhox-libs.UI.GameHUD"
 
@@ -70,6 +79,24 @@ local towerManager_ = nil
 local weatherManager_ = nil
 ---@type MiningSystem|nil
 local miningSystem_ = nil
+---@type FurnaceManager|nil
+local furnaceManager_ = nil
+---@type ContainerManager|nil
+local containerManager_ = nil
+---@type EnchantingManager|nil
+local enchantingManager_ = nil
+---@type FarmingManager|nil
+local farmingManager_ = nil
+---@type FishingManager|nil
+local fishingManager_ = nil
+---@type RedstoneManager|nil
+local redstoneManager_ = nil
+---@type FurnaceUI|nil
+local furnaceUI_ = nil
+---@type ChestUI|nil
+local chestUI_ = nil
+---@type EnchantingUI|nil
+local enchantingUI_ = nil
 -- 暂停菜单/设置打开时冻结游戏世界（UI 仍可交互）
 local paused_ = false
 ---@type PauseMenu|nil
@@ -269,10 +296,57 @@ function Standalone.OnWorldReady()
 
     -- 防御塔：方块变化时重新检测基座
     towerManager_ = TowerManager.new(scene_, world_)
+
+    -- 方块实体与玩法系统（熔炉 / 箱子 / 附魔 / 农业 / 钓鱼 / 红石）
+    furnaceManager_ = FurnaceManager.new(scene_, world_, itemDropSystem_)
+    containerManager_ = ContainerManager.new(scene_, world_, itemDropSystem_)
+    enchantingManager_ = EnchantingManager.new(world_, itemDropSystem_)
+    farmingManager_ = FarmingManager.new(world_, itemDropSystem_)
+    fishingManager_ = FishingManager.new(scene_, world_, itemDropSystem_)
+    redstoneManager_ = RedstoneManager.new(world_)
+    blockInteraction_:setFishingManager(fishingManager_)
+    blockInteraction_:setFarmingManager(farmingManager_)
+
     blockInteraction_:setBlockChangedHandler(function(x, y, z, oldType, newType)
         if towerManager_ then
             towerManager_:onBlockChanged(x, y, z, oldType, newType)
         end
+        if furnaceManager_ then
+            furnaceManager_:onBlockChanged(x, y, z, oldType, newType)
+        end
+        if containerManager_ then
+            containerManager_:onBlockChanged(x, y, z, oldType, newType)
+        end
+        if farmingManager_ then
+            farmingManager_:onBlockChanged(x, y, z, oldType, newType)
+        end
+        if redstoneManager_ then
+            redstoneManager_:onBlockChanged(x, y, z, oldType, newType)
+        end
+    end)
+
+    -- 右键「使用」方块（熔炉 / 箱子 / 附魔台 / 拉杆 / 按钮）
+    blockInteraction_:setBlockUseHandler(Blocks.FURNACE, function(x, y, z)
+        if furnaceUI_ then furnaceUI_:open(x, y, z) return true end
+        return false
+    end)
+    blockInteraction_:setBlockUseHandler(Blocks.LIT_FURNACE, function(x, y, z)
+        if furnaceUI_ then furnaceUI_:open(x, y, z) return true end
+        return false
+    end)
+    blockInteraction_:setBlockUseHandler(Blocks.CHEST, function(x, y, z)
+        if chestUI_ then chestUI_:open(x, y, z) return true end
+        return false
+    end)
+    blockInteraction_:setBlockUseHandler(Blocks.ENCHANTING_TABLE, function(x, y, z)
+        if enchantingUI_ then enchantingUI_:open(x, y, z) return true end
+        return false
+    end)
+    blockInteraction_:setBlockUseHandler(Blocks.LEVER, function(x, y, z)
+        return redstoneManager_:toggleLever(x, y, z)
+    end)
+    blockInteraction_:setBlockUseHandler(Blocks.STONE_BUTTON, function(x, y, z)
+        return redstoneManager_:pressButton(x, y, z)
     end)
 
     -- 创建 UI
@@ -287,6 +361,20 @@ function Standalone.OnWorldReady()
         dropSystem = itemDropSystem_,
         projectiles = projectileManager_,
     })
+
+    -- 容器界面（熔炉 / 箱子 / 附魔台）
+    furnaceUI_ = FurnaceUI.new(furnaceManager_, player_, { playerController = playerController_ })
+    chestUI_ = ChestUI.new(containerManager_, player_, { playerController = playerController_ })
+    enchantingUI_ = EnchantingUI.new(enchantingManager_, player_, { playerController = playerController_ })
+    do
+        local ui = GameSystems:getUIManager()
+        if ui and ui.root then
+            ui.root:AddChild(furnaceUI_:build())
+            ui.root:AddChild(chestUI_:build())
+            ui.root:AddChild(enchantingUI_:build())
+        end
+    end
+    GameSystems:registerContainerUI(furnaceUI_, chestUI_, enchantingUI_)
 
     -- 读档；没有存档就给初始装备（生存模式开局）
     if not ItemSaveSystem.load(player_, itemDropSystem_) then
@@ -563,6 +651,16 @@ function Standalone.giveStartingItems()
         { "iron_ingot", 16 },
         { "block:13", 18 },     -- 圆石（防御塔基座，可搭 2 层）
         { "block:66", 2 },      -- 火焰石（防御塔攻击台）
+        { "block:23", 1 },      -- 熔炉
+        { "block:73", 1 },      -- 箱子
+        { "block:74", 1 },      -- 附魔台
+        { "redstone", 16 },     -- 红石粉（材料）
+        { "block:77", 16 },     -- 红石导线
+        { "block:80", 2 },      -- 拉杆
+        { "block:82", 2 },      -- 红石灯
+        { "wheat_seed", 8 },    -- 小麦种子
+        { "hoe", 1 },           -- 锄头
+        { "fishing_rod", 1 },   -- 钓鱼竿
     }
 
     for _, entry in ipairs(items) do
@@ -675,6 +773,12 @@ function HandleUpdate(eventType, eventData)
         towerManager_:update(timeStep)
     end
 
+    -- 方块实体 / 农业 / 钓鱼 / 红石
+    if furnaceManager_ then furnaceManager_:update(timeStep) end
+    if farmingManager_ then farmingManager_:update(timeStep) end
+    if fishingManager_ then fishingManager_:update(timeStep) end
+    if redstoneManager_ then redstoneManager_:update(timeStep) end
+
     -- 天气状态 / 明暗过渡 / 降水覆盖层
     if weatherManager_ then
         weatherManager_:update(timeStep)
@@ -736,6 +840,8 @@ function HandleKeyDown(eventType, eventData)
         if pauseMenu_ then
             if pauseMenu_:isOpen() then
                 pauseMenu_:back()
+            elseif GameSystems:isContainerOpen() then
+                GameSystems:closeContainerUIs()
             elseif GameSystems:isInventoryOpen() then
                 GameSystems.inventoryUI:toggle()
                 if GameSystems.hotbar then
@@ -863,6 +969,12 @@ function Standalone.Stop()
         towerManager_:destroy()
         towerManager_ = nil
     end
+    if furnaceManager_ then furnaceManager_:destroy(); furnaceManager_ = nil end
+    if containerManager_ then containerManager_:destroy(); containerManager_ = nil end
+    if enchantingManager_ then enchantingManager_:destroy(); enchantingManager_ = nil end
+    if farmingManager_ then farmingManager_:destroy(); farmingManager_ = nil end
+    if fishingManager_ then fishingManager_:destroy(); fishingManager_ = nil end
+    if redstoneManager_ then redstoneManager_:destroy(); redstoneManager_ = nil end
     -- 天气管理器没有持久节点；覆盖层随 UI 根节点一起销毁
     weatherManager_ = nil
     if miningSystem_ then
@@ -934,6 +1046,12 @@ function GetDebugGameContext()
         blockInteraction = blockInteraction_,
         miningSystem = miningSystem_,
         pauseMenu = pauseMenu_,
+        furnaceManager = furnaceManager_,
+        containerManager = containerManager_,
+        enchantingManager = enchantingManager_,
+        farmingManager = farmingManager_,
+        fishingManager = fishingManager_,
+        redstoneManager = redstoneManager_,
     }
 end
 

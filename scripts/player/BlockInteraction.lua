@@ -47,6 +47,9 @@ function BlockInteraction.new(player, world, options)
     self.projectiles = nil     -- 弓箭投射物（由外部设置）
     self.craftingTableHandler = nil -- 右键工作台回调（由外部设置）
     self.onBlockChanged = nil       -- 方块放置/破坏回调（防御塔检测用）
+    self.blockUseHandlers = {}      -- 方块「使用」回调：blockId → function(x,y,z) -> boolean
+    self.fishingManager = nil       -- 钓鱼管理器（由外部设置）
+    self.farmingManager = nil       -- 农业管理器（由外部设置）
     
     -- 网络模式配置
     options = options or {}
@@ -90,6 +93,25 @@ end
 ---@param handler fun(x: integer, y: integer, z: integer, oldType: integer, newType: integer)|nil
 function BlockInteraction:setBlockChangedHandler(handler)
     self.onBlockChanged = handler
+end
+
+---注册某个方块的右键「使用」回调（熔炉/箱子/附魔台/拉杆/按钮）
+---@param blockType integer
+---@param handler fun(x: integer, y: integer, z: integer): boolean
+function BlockInteraction:setBlockUseHandler(blockType, handler)
+    self.blockUseHandlers[blockType] = handler
+end
+
+---设置钓鱼管理器
+---@param manager FishingManager|nil
+function BlockInteraction:setFishingManager(manager)
+    self.fishingManager = manager
+end
+
+---设置农业管理器
+---@param manager FarmingManager|nil
+function BlockInteraction:setFarmingManager(manager)
+    self.farmingManager = manager
 end
 
 ---通知方块变化
@@ -245,7 +267,19 @@ function BlockInteraction:onRightClick()
         end
     end
 
-    -- ② 手里拿的不是方块物品 → 走物品行为（食物 / 药水 / 桶 / 弓 / 护甲）
+    -- ①.7 目标是注册了「使用」回调的方块（熔炉/箱子/附魔台/拉杆/按钮）
+    do
+        local hitX, hitY, hitZ = self:getTargetBlock()
+        if hitX then
+            local blockType = self.world:getBlock(hitX, hitY, hitZ)
+            local handler = self.blockUseHandlers[blockType]
+            if handler then
+                return handler(hitX, hitY, hitZ)
+            end
+        end
+    end
+
+    -- ② 手里拿的不是方块物品 → 走物品行为（食物 / 药水 / 桶 / 弓 / 护甲 / 钓鱼竿 / 锄头 / 种子）
     local stack = nil
     if self.player and self.player.getSelectedStack then
         stack = self.player:getSelectedStack()
@@ -266,6 +300,8 @@ function BlockInteraction:onRightClick()
             blockInteraction = self,
             projectiles = self.projectiles,
             world = self.world,
+            fishing = self.fishingManager,
+            farming = self.farmingManager,
         }
         return ItemBehaviors.use(ctx)
     end

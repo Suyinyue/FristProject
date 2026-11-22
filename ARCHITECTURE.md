@@ -946,17 +946,26 @@ npx -y @taptap/maker preview validate --mode validate \
 | 动物繁殖 | 右键喂食 + 求偶 + 幼体成长（§6.5.1） |
 | 矿石生成 | `WorldGenerator.GEO_FEATURES`；`devtools/OreCheck.lua` 验证出生点 64×64 内煤/铁/铜/金刚岩等均有生成 |
 
-仍未实现（按 Design.md 优先级）：
+已实现（2026-11-22，本轮「Minecraft 复刻」收尾）：
 
-1. **熔炉与烧炼**（新方块 LIT_FURNACE、`FurnaceManager`、`FurnaceUI`、烧炼配方/燃料）
-2. **箱子与容器**（CHEST、`ContainerManager`、`ChestUI`、容器存档）
-3. **附魔**（附魔台、青金石、附魔效果接入攻击/护甲/耐久）
-4. **农业种植**（耕地/小麦作物/种子/锄头、`FarmingManager`、阶段贴图与掉落）
-5. **钓鱼**（钓鱼竿/鱼/浮漂、`FishingManager`、钓获表）
-6. **红石**（拉杆/按钮/红石粉/红石火把/红石灯、信号 BFS）
+| 系统 | 落点 |
+|---|---|
+| 熔炉与烧炼 | `items/FurnaceManager.lua` + `ui/FurnaceUI.lua`；方块 LIT_FURNACE(72)；`GameConfig.Furnace/Fuel/Smelting`；破坏熔炉掉落 3 槽内容 |
+| 箱子与容器 | `items/ContainerManager.lua` + `ui/ChestUI.lua`；方块 CHEST(73)；27 格 + 玩家背包互传 |
+| 附魔 | `items/EnchantingManager.lua` + `data/Enchantments.lua` + `ui/EnchantingUI.lua`；方块 ENCHANTING_TABLE(74)；锋利/保护/耐久效果接入 `Inventory` |
+| 农业种植 | `items/FarmingManager.lua`；方块 FARMLAND(75)/WHEAT_CROP(76)；锄头耕地、种子种植、随机 tick 生长、成熟收割 |
+| 钓鱼 | `items/FishingManager.lua`；物品 fishing_rod；浮漂/咬钩/收杆/钓获表 |
+| 红石（简化） | `items/RedstoneManager.lua`；方块 77~82（红石粉/火把/块/拉杆/按钮/灯）；事件驱动 BFS 信号传播，灯点亮 + 门/活板门开关 |
 
-> 这些系统的数据/模块/接线位置已在 `Design.md`「附：Minecraft 未实现功能」中给出，
-> 新增方块 ID 从 **72** 顺延（当前 72 起仍空闲）。
+> 实现要点：方块 ID 从 72 顺延（72 LIT_FURNACE / 73 CHEST / 74 附魔台 / 75 耕地 / 76 小麦作物 /
+> 77~82 红石六件）；所有新方块纹理暂复用已有 tile（占位，后续可替换独立贴图）；
+> 方块实体数据用「坐标 → 数据」旁路表（与 `TowerManager` 同款）；右键「使用」统一走
+> `BlockInteraction:setBlockUseHandler`；容器 UI 注册进 `GameSystems`（`registerContainerUI`），
+> 打开时与背包一样切鼠标模式并屏蔽挖掘/攻击（`isInventoryOpen` 已涵盖）。
+> 容器/熔炉内容仍**不持久化**（与「世界方块不持久化」限制一致，见 §14）。
+
+> 已知取舍：附魔台只用整格方块（非半格）；耕地/作物/红石粉等纹理复用既有 tile，无独立贴图；
+> 红石火把未做「被充能则熄灭」的反向逻辑（恒为满信号源）；门/活板门作为红石输出的开合状态不随存档。
 
 ---
 

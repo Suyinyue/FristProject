@@ -17,6 +17,7 @@
 local ItemStack = require("items.ItemStack")
 local ItemRegistry = require("items.ItemRegistry")
 local InventorySlot = require("items.InventorySlot")
+local Enchantments = require("data.Enchantments")
 
 ---@class Inventory
 ---@field slots InventorySlot[]
@@ -251,7 +252,7 @@ end
 -- 加成计算（Design.md 物品内容）
 -- ====================================================================
 
----护甲加成总和
+---护甲加成总和（含「保护」附魔）
 ---@return number
 function Inventory:getArmorBonus()
     ---@type number
@@ -262,20 +263,28 @@ function Inventory:getArmorBonus()
         if def and def.armorBonus then
             bonus = bonus + def.armorBonus
         end
+        if stack and stack.enchantments then
+            bonus = bonus + Enchantments.value("protection", Enchantments.level(stack, "protection"))
+        end
     end
     return bonus
 end
 
----手上物品的攻击力加成
+---手上物品的攻击力加成（含「锋利」附魔）
 ---@param hotbarIndex integer 1..9
 ---@return number
 function Inventory:getHeldAttackBonus(hotbarIndex)
     local stack = self:getHotbarStack(hotbarIndex)
     local def = stack and ItemRegistry:get(stack.id)
+    ---@type number
+    local bonus = 0
     if def and def.attackBonus then
-        return def.attackBonus
+        bonus = def.attackBonus
     end
-    return 0
+    if stack and stack.enchantments then
+        bonus = bonus + Enchantments.value("sharpness", Enchantments.level(stack, "sharpness"))
+    end
+    return bonus
 end
 
 ---手上物品的工具类型
@@ -292,6 +301,7 @@ end
 -- ====================================================================
 
 ---对某个槽位的物品消耗耐久，耐久归零则移除
+---（「耐久」附魔有 1/(level+1) 概率跳过本次消耗）
 ---@param index integer
 ---@param amount integer|nil
 ---@return boolean broken
@@ -302,6 +312,13 @@ function Inventory:damageSlot(index, amount)
     end
     if not slot.stack:hasDurability() then
         return false
+    end
+
+    if slot.stack.enchantments then
+        local ub = Enchantments.level(slot.stack, "unbreaking")
+        if ub > 0 and math.random() < 1 / (ub + 1) then
+            return false
+        end
     end
 
     local broken = slot.stack:damage(amount or 1)
