@@ -61,8 +61,8 @@ local BLOCK_DROPS = {
     [Blocks.GRASS] = "block:2",           -- 泥土
     [Blocks.SNOWY_GRASS] = "block:2",
     [Blocks.COAL_ORE] = "coal",
-    [Blocks.IRON_ORE] = "iron_ingot",
-    [Blocks.GOLD_ORE] = "gold_ingot",
+    [Blocks.IRON_ORE] = "raw_iron",
+    [Blocks.GOLD_ORE] = "raw_gold",
     [Blocks.DIAMOND_ORE] = "diamond",
     [Blocks.LEAVES] = "block:45",         -- 树苗
 }

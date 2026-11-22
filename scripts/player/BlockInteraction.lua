@@ -11,6 +11,7 @@ local BlockShapes = require("data.BlockShapes")
 local BlockHarvest = require("data.BlockHarvest")
 local ItemBehaviors = require("items.ItemBehaviors")
 local ItemStack = require("items.ItemStack")
+local ItemRegistry = require("items.ItemRegistry")
 local Events = require("config.GameEvents")
 
 -- 常量本地化（热路径优化）
@@ -297,6 +298,59 @@ end
 -- 单机模式：直接操作本地 world
 -- ============================================================================
 
+---破坏方块掉落：优先自动进背包，背包放不下才生成地面掉落物
+---@param blockType integer
+---@param bx integer
+---@param by integer
+---@param bz integer
+function BlockInteraction:giveBlockDrop(blockType, bx, by, bz)
+    local itemId = BlockHarvest.dropFor(blockType)
+    if not itemId or not ItemRegistry:get(itemId) then
+        return
+    end
+    local stack = ItemStack.new(itemId, 1)
+    if not stack then
+        return
+    end
+
+    local remaining = stack
+    local inventory = self.player and self.player:getInventory() or nil
+    if inventory then
+        remaining = inventory:addStack(stack)
+        inventory:markDirty()
+    end
+
+    if remaining and remaining.count > 0 and self.itemDropSystem then
+        local pos = Vector3(
+            bx * BLOCK_SIZE + BLOCK_SIZE * 0.5,
+            by * BLOCK_SIZE + BLOCK_SIZE * 0.5,
+            bz * BLOCK_SIZE + BLOCK_SIZE * 0.5)
+        self.itemDropSystem:spawn(remaining, pos)
+    end
+end
+
+---破坏指定坐标的方块（持续挖掘完成时调用）
+---@param bx integer
+---@param by integer
+---@param bz integer
+---@return boolean
+function BlockInteraction:breakBlockAt(bx, by, bz)
+    local blockType = self.world:getBlock(bx, by, bz)
+    if blockType == AIR then
+        return false
+    end
+
+    -- 火把是独立节点：先移除节点，再走正常方块破坏（掉落/耐久/事件）
+    if blockType == Blocks.TORCH and self.torchDecorator then
+        self.torchDecorator:removeTorch(bx, by, bz)
+    end
+
+    if self.isNetworkMode then
+        return self:destroyBlockNetwork(bx, by, bz)
+    end
+    return self:destroyBlockLocal(bx, by, bz)
+end
+
 ---本地破坏方块
 ---@param bx number 方块X坐标
 ---@param by number 方块Y坐标
@@ -331,11 +385,11 @@ function BlockInteraction:destroyBlockLocal(bx, by, bz)
         heldTool = self.player:getInventory():getHeldToolType(self.player:getSelectedSlotIndex())
     end
     local canHarvest = BlockHarvest.canHarvest(blockType, heldTool)
-    if self.itemDropSystem then
-        self.itemDropSystem:dropBlock(blockType, bx, by, bz, canHarvest)
-    end
-    if heldTool and self.player.damageSelected then
-        self.player:damageSelected(Config.Items.BLOCK_DURABILITY_COST)
+    if canHarvest then
+        self:giveBlockDrop(blockType, bx, by, bz)
+        if heldTool and self.player.damageSelected then
+            self.player:damageSelected(Config.Items.BLOCK_DURABILITY_COST)
+        end
     end
 
     -- 发送本地事件

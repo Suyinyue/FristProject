@@ -329,10 +329,9 @@ function GameSystems:handleKeyDown(key)
         return true
     end
 
-    -- ESC 退出
+    -- ESC 由 Standalone / Client 的暂停菜单处理；共享层不再直接退出游戏
     if key == KEY_ESCAPE then
-        engine:Exit()
-        return true
+        return false
     end
     
     return false  -- 未处理，交给调用方

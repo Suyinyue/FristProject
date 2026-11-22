@@ -106,8 +106,12 @@ scripts/
 │   ├── Player.lua          玩家属性/背包/装备加成/饥饿/药水效果/攻击
 │   ├── PlayerController.lua 移动、碰撞、自动上台阶、飞行、鼠标视角
 │   ├── BlockInteraction.lua DDA 射线、破坏/放置/使用、工具/耐久/掉落回调
+│   ├── MiningSystem.lua    持续挖掘进度 + 裂纹 + 掉落进背包
 │   ├── FirstPersonArm.lua  第一人称手臂与手持方块
 │   └── PlayerBody.lua      第三人称身体
+├── save/
+│   ├── SettingsManager.lua 游戏设置读取/保存/应用（settings.json）
+│   └── SaveManager.lua     世界存档（saves/<World_xxx>/，区块 RLE）
 ├── entity/
 │   ├── Mob.lua             生物实体：血量、朝向、飞行/悬浮、剔除；AI 委托给 ai/
 │   ├── MobManager.lua      生成机制、死亡掉落、自爆结算
@@ -118,9 +122,11 @@ scripts/
 │       ├── AIStateMachine.lua 状态机（IDLE/WANDERING/CHASING/ATTACKING）
 │       └── Pathfinding.lua    方块级 A* 寻路 + 视线检测
 ├── ui/
-│   ├── UIManager.lua       根 UI：准星、血条、饥饿、时间、背包按钮、Hotbar
+│   ├── UIManager.lua       根 UI：准星、血条、饥饿、经验、时间、挖掘进度、背包按钮、Hotbar
 │   ├── Hotbar.lua          9 格快捷栏（物品系统）
 │   ├── InventoryUI.lua     背包/装备/2×2 或 3×3 合成/创造页
+│   ├── PauseMenu.lua       ESC 暂停菜单 + 设置 + 存档加载/删除
+│   ├── WeatherOverlay.lua  天气降水/闪电屏幕覆盖层
 │   ├── MobileInputManager.lua 虚拟摇杆 + 触屏视角 + 挖掘/放置按钮
 │   ├── LoadingScreen.lua / UnderwaterOverlay.lua / SuffocationBox.lua
 │   └── DebugOverlay.lua
@@ -299,20 +305,23 @@ Blocks:getColor(id) / getDisplayName(id) / getPlaceableBlocks()
 - 跳跃/重力/飞行（F 切换）；鼠标视角需 `mouseLocked`。
 - 背包打开时 `setMouseLocked(false)`，关闭恢复；移动端始终关闭鼠标视角。
 
-### 5.3 BlockInteraction
+### 5.3 BlockInteraction + MiningSystem（持续挖掘）
 
 - DDA 射线（无临时 Vector3），交互距离 `REACH_DISTANCE=10`。
-- 左键：
-  1. 挥臂；2. 优先尝试破坏火把（独立节点）；3. 射线找到方块；4. 基岩拒绝；
-  5. 本地/联机破坏。
-- 右键：
-  1. 挥臂；2. 门/活板门 → 开关；3. 工作台 → 打开 3×3 合成；
-  4. 手持物品不是方块 → `ItemBehaviors.use(ctx)`；
-  5. 方块物品 → 放置并消耗 1。
+- **左键 = 持续挖掘**（`player/MiningSystem.lua`），不再是点一下立即破坏：
+  1. 按下左键 → `MiningSystem:startMining()`，按 `data/MiningRules.lua` 计算所需时间；
+  2. 每帧 `progress += dt / duration`，HUD 显示「挖掘 n%」进度条 + 方块表面裂纹（4 级程序化裂纹贴图）；
+  3. 进度到 100% → 调 `BlockInteraction:breakBlockAt(x,y,z)` 走正常破坏/掉落/耐久/事件。
+  4. 松开左键 / 目标变化 / 切换物品 / 超距离 / 死亡 / 打开 UI → 立即中断。
+- 挖掘时间：`MiningRules.baseTime(方块)` / `MiningRules.toolEfficiency(方块, 手持工具)`；
+  匹配工具 1.0、错误工具 0.35、徒手 0.2；基岩/水/岩浆不可挖。
+  例：泥土 0.3s、木头 1.0s、石头 1.5s、铁矿 2.0s、钻石矿 3.0s。
+- **右键**：挥臂 → 门/活板门开关 → 工作台 3×3 合成 → 非方块物品 `ItemBehaviors.use(ctx)` → 方块放置消耗 1。
 - 工具/掉落：
-  - `data/BlockHarvest.lua` 定义每类方块需要的工具（镐/斧/铲）与掉落物
-  - 工具不对仍能破坏，但**不掉落**（MC 规则）
-  - 破坏方块消耗工具耐久；放置/破坏后调用 `onBlockChanged`（防御塔检测）
+  - `data/BlockHarvest.lua` 定义需要的工具（镐/斧/铲）与掉落物；工具不对仍能破坏但不掉落。
+  - **掉落优先自动进背包**（`giveBlockDrop`），背包满才生成地面掉落物。
+  - 破坏消耗工具耐久；`onBlockChanged` 通知防御塔。
+  - 铁矿石/金矿石现在掉「粗铁/粗金」（`raw_iron`/`raw_gold`），1 个可合成 1 个锭（熔炉落地前过渡）。
 - 门：上下两格同步破坏/开关；半砖/楼梯/活板门按玩家朝向推断放置状态。
 - 回调注入（由 Standalone 设置）：`setItemSystems`、`setCraftingTableHandler`、`setBlockChangedHandler`。
 
@@ -322,15 +331,15 @@ Blocks:getColor(id) / getDisplayName(id) / getPlaceableBlocks()
 |---|---|
 | 移动 / 跳跃 | WASD / 空格 |
 | 视角 | 鼠标（移动端右半屏拖动） |
-| 左键 | 攻击生物 / 挖掘方块 |
-| 右键 | 使用物品 / 放置方块 / 开关门 |
+| 左键（按住） | 持续挖掘 / 攻击生物 |
+| 右键 | 使用物品 / 放置方块 / 开关门 / 喂食动物 |
 | 背包 | `E`（或右上角「背包」按钮） |
-| 快捷栏 | `1`~`9` |
+| 快捷栏 | `1`~`9`、鼠标滚轮 |
 | 丢弃 | `Q`（`Shift+Q` 丢整堆） |
 | 飞行模式 | `F` |
 | 时间：正午/午夜/加速 | `Y` / `N` / `L` |
+| 暂停菜单 / 设置 / 存档 | `ESC` |
 | 性能测试 | `B` / `P` / `O` |
-| 退出 | `ESC` |
 
 ---
 
@@ -678,6 +687,28 @@ blockId
 - 背包打开时：桌面切 `MM_ABSOLUTE` + 鼠标可见；关闭恢复 `MM_RELATIVE`。移动端不切鼠标模式。
 - 游戏层点击前可用 `GameSystems:isInventoryOpen()` 屏蔽挖掘/放置/攻击。
 
+### 9.4 暂停菜单 / 设置（PauseMenu + SettingsManager）
+
+- `ESC` 打开 `ui/PauseMenu.lua`：返回游戏 / 设置 / 保存游戏 / 加载游戏 / 返回主菜单 / 退出游戏。
+- 打开时冻结世界（生物 AI、时间、天气、玩家、挖掘），UI 仍可交互；子页按 `ESC` 逐级返回。
+- 设置由 `save/SettingsManager.lua` 持久化到 `settings.json`（与世界存档分开），支持：
+  - 音频：主音量 / 音乐 / 音效（`audio:SetMasterGain`）
+  - 画面：FOV、渲染距离、全屏、画质（低/中/高）、分辨率（仅 UI，本引擎运行时禁改分辨率）
+  - 游戏：鼠标灵敏度、反转 Y、显示 FPS、自动保存开关与间隔
+- 生效项：音量、FOV、渲染距离、全屏、画质、灵敏度、反转 Y、FPS、自动保存；分辨率暂不支持运行时修改（`graphics:SetMode` 被禁用）。
+
+### 9.5 世界存档（SaveManager）
+
+- 目录（引擎项目+用户隔离）：`saves/<World_xxx>/`，含 `world.json`、`player.json`、`entities.json`、`chunks/<cx>_<cz>.json`。
+- 保存内容：世界元数据（Seed/版本/时间/天气）、玩家（位置/朝向/生命/饥饿/饱和度/经验/背包/快捷栏）、
+  全部已生成区块（方块 RLE + blockState）、生物（类型/位置/血量/幼体/求偶/冷却）、地面掉落物。
+- 区块用 **RLE 压缩**（不是整数组 JSON）；临时文件写入 + 原子替换 + `.bak` 备份。
+- 加载：先恢复区块并标记 `ChunkStreamer.generated`，**被挖掉的矿石不会复活**；未保存过的区块继续用原 Seed 生成。
+  恢复时会重建天光、重注方块光、重建火把节点、重新登记防御塔火焰石。
+- 自动保存：默认开、间隔 300s（设置可改/关），同时写 `items_save.json` 和世界存档。
+- 手动：ESC → 保存游戏 / 加载游戏 / 删除存档（删除需二次确认）。
+- 存档列表：`SaveManager.listWorlds()`；验收 `devtools/SaveLoadCheck.lua`。
+
 ---
 
 ## 10. 配置速查（GameConfig）
@@ -693,6 +724,8 @@ blockId
 | `XP` / `MobXP` | 升级公式 7+1.2L+0.15L²；僵尸 5 / 幽灵 3 / 炸弹人 8 / 弓箭手 5 / 动物 1~2 |
 | `Breeding` | 求偶 5s、配对 4 格、幼体 0.5 倍、成长 240s、冷却 60s |
 | `Weather` | 晴 240~600s、雨 120~360s、雷雨概率 0.25、明暗过渡 0.35/s |
+| `MiningRules` | 挖掘时间（泥土 0.3s / 木头 1.0s / 石头 1.5s / 铁矿 2.0s / 钻石 3.0s）；工具效率 1.0/0.35/0.2 |
+| `Settings` | `settings.json`：音量/FOV/渲染距离/全屏/画质/灵敏度/反转 Y/FPS/自动保存 |
 | `Tower` | 攻击 500、间隔 1s、每层 3 格、3k 块/层、光束 0.18s |
 | `Streaming` | 生成 3ms/帧、构建 4ms/帧、4 个并行、初始半径 3 |
 | `DayNight` | 1 天 480s、开始 6.2、启用；视觉用 ProceduralSky 连续渐变 |
@@ -943,7 +976,10 @@ npx -y @taptap/maker preview validate --mode validate \
 - 日夜改为连续渐变：`ProceduralSky` + `SkyLightCapture`（不再硬切 LightGroup 预设）
 - 新增天气（雨/雷雨/雪 + 屏幕降水 + 落雷）、饥饿饱和度与自然回血、经验等级 HUD、动物喂食繁殖
 - 确认矿石生成有效：`OreCheck` 出生点 64×64 内 coal=691 iron=345 copper=291 adamant=107 gold=51 diamond=11
-- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck / DayNightCheck / WeatherCheck / SurvivalCheck
+- 持续挖掘（`MiningSystem` + `MiningRules`，进度条 + 裂纹 + 掉落进背包）
+- 暂停菜单 / 设置界面（`PauseMenu` + `SettingsManager`，音量/FOV/渲染距离/灵敏度等持久化到 `settings.json`）
+- 世界存档系统（`SaveManager`，区块 RLE + 玩家/生物/掉落/时间/天气，目录 `saves/<World_xxx>/`）
+- 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck / DayNightCheck / WeatherCheck / SurvivalCheck / MiningCheck / SaveLoadCheck
 - Git Stop Hook 自动提交/推送（github/dev）
 
 ---

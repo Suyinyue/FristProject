@@ -185,6 +185,44 @@ function UIManager:build()
                 fontSize = 12,
                 fontColor = {200, 220, 255, 220},
             },
+
+            UI.Label {
+                id = "fps_label",
+                text = "FPS 0",
+                fontSize = 11,
+                fontColor = {180, 255, 180, 220},
+                visible = false,
+            },
+        },
+
+        -- 挖掘进度（准星下方，只有挖掘时显示）
+        UI.Panel {
+            id = "mining_progress_container",
+            position = "absolute",
+            left = 0,
+            right = 0,
+            top = "55%",
+            flexDirection = "column",
+            alignItems = "center",
+            gap = 3,
+            pointerEvents = "none",
+            visible = false,
+
+            UI.Label {
+                id = "mining_progress_label",
+                text = "挖掘 0%",
+                fontSize = 11,
+                fontColor = { 235, 235, 235, 230 },
+            },
+
+            UI.ProgressBar {
+                id = "mining_progress_bar",
+                value = 0,
+                width = 120,
+                height = 7,
+                fillColor = { 235, 210, 120, 255 },
+                trackBgColor = { 20, 20, 20, 190 },
+            },
         },
 
         -- 说明文本 (右上角，半透明)
@@ -391,6 +429,56 @@ function UIManager:setPlayerXp(level, xp, xpNext)
     if label then
         label:SetText(string.format("Lv.%d  经验 %d/%d",
             level, math.floor(xp + 0.5), math.floor(need + 0.5)))
+    end
+end
+
+---更新挖掘进度（nil = 隐藏）
+---@param progress number|nil 0..1
+function UIManager:setMiningProgress(progress)
+    if not self.root then
+        return
+    end
+    local container = self.root:FindById("mining_progress_container")
+    if not container then
+        return
+    end
+    if not progress then
+        container:SetVisible(false)
+        return
+    end
+    container:SetVisible(true)
+    local p = math.max(0, math.min(1, progress))
+    local bar = self.root:FindById("mining_progress_bar") --[[@as ProgressBar]]
+    if bar then
+        bar:SetValue(p)
+    end
+    local label = self.root:FindById("mining_progress_label") --[[@as Label]]
+    if label then
+        label:SetText(string.format("挖掘 %d%%", math.floor(p * 100 + 0.5)))
+    end
+end
+
+---显示 / 隐藏 FPS
+---@param visible boolean
+function UIManager:setFpsVisible(visible)
+    if not self.root then
+        return
+    end
+    local label = self.root:FindById("fps_label") --[[@as Label]]
+    if label then
+        label:SetVisible(visible and true or false)
+    end
+end
+
+---更新 FPS 文本
+---@param fps number
+function UIManager:setFps(fps)
+    if not self.root then
+        return
+    end
+    local label = self.root:FindById("fps_label") --[[@as Label]]
+    if label then
+        label:SetText(string.format("FPS %d", math.floor(fps + 0.5)))
     end
 end
 

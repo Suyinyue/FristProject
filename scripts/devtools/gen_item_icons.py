@@ -118,6 +118,20 @@ def coal(d):
     poly(d, [(37, 41), (45, 38), (47, 45), (40, 49)], (84, 80, 78, 255))
 
 
+def raw_iron(d):
+    poly(d, [(16, 38), (22, 22), (36, 18), (48, 28), (48, 44), (36, 52), (20, 48)], (126, 112, 100, 255), OUT)
+    for x, y, r in ((28, 30, 3), (40, 26, 2), (38, 42, 3), (24, 42, 2), (32, 46, 2)):
+        ellipse(d, x - r, y - r, x + r, y + r, (188, 178, 168, 255))
+    line(d, [(20, 34), (26, 28)], (86, 74, 64, 255), 2)
+
+
+def raw_gold(d):
+    poly(d, [(16, 38), (22, 22), (36, 18), (48, 28), (48, 44), (36, 52), (20, 48)], (150, 118, 58, 255), OUT)
+    for x, y, r in ((28, 30, 3), (40, 26, 2), (38, 42, 3), (24, 42, 2), (32, 46, 2)):
+        ellipse(d, x - r, y - r, x + r, y + r, GOLD)
+    line(d, [(20, 34), (26, 28)], (110, 84, 38, 255), 2)
+
+
 def iron_ingot(d):
     poly(d, [(14, 40), (20, 26), (48, 26), (54, 40)], STEEL_L, OUT)
     poly(d, [(14, 40), (54, 40), (50, 50), (18, 50)], STEEL, OUT)
@@ -359,7 +373,8 @@ def water_bucket(d):
 # 输出
 # ======================================================================
 ICONS = {
-    "stick": stick, "coal": coal, "iron_ingot": iron_ingot, "gold_ingot": gold_ingot,
+    "stick": stick, "coal": coal, "raw_iron": raw_iron, "raw_gold": raw_gold,
+    "iron_ingot": iron_ingot, "gold_ingot": gold_ingot,
     "diamond": diamond, "leather": leather, "feather": feather, "string": string_icon,
     "gunpowder": gunpowder, "ectoplasm": ectoplasm, "wheat": wheat, "arrow": arrow,
     "apple": apple, "bread": bread, "beef": beef, "porkchop": porkchop,

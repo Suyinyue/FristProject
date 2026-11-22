@@ -62,6 +62,17 @@ CraftingRecipes.recipes = {
         key = { I = "iron_ingot", S = "stick", F = "feather" },
         result = { id = "arrow", count = 4 },
     },
+    -- 粗矿 → 锭（熔炉系统落地前的临时过渡配方）
+    {
+        id = "raw_iron_to_ingot",
+        shapeless = { "raw_iron" },
+        result = { id = "iron_ingot", count = 1 },
+    },
+    {
+        id = "raw_gold_to_ingot",
+        shapeless = { "raw_gold" },
+        result = { id = "gold_ingot", count = 1 },
+    },
 
     -- ==================== 武器 ====================
     {

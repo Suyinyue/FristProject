@@ -117,7 +117,10 @@ V.atFrame(1340, function()
 
     local icon = root and root:FindById("hotbar_icon_1") --[[@as Label]]
     if icon then
-        V.assert(icon:GetText() == "剑", "快捷栏 1 应为剑，实际：" .. tostring(icon:GetText()))
+        -- 非方块物品用贴图图标（背景图），方块/缺图才回退到汉字字符
+        local okIcon = icon:GetText() == "剑"
+            or (icon.props and icon.props.backgroundImage == "Textures/items/sword.png")
+        V.assert(okIcon, "快捷栏 1 应为剑（文字或贴图），实际：" .. tostring(icon:GetText()))
     end
     local cnt = root and root:FindById("hotbar_count_7") --[[@as Label]]
     if cnt then

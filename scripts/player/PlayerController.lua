@@ -396,8 +396,9 @@ function PlayerController:updateMouseLook(timeStep)
     if self.mouseLocked then
         local mouseMove = input.mouseMove
         local sensitivity = Config.Controls.MOUSE_SENSITIVITY
+        local invert = Config.Controls.INVERT_Y and -1 or 1
         player:setYaw(player:getYaw() + mouseMove.x * sensitivity)
-        player:setPitch(player:getPitch() + mouseMove.y * sensitivity)
+        player:setPitch(player:getPitch() + mouseMove.y * sensitivity * invert)
     end
 
     player:updateCamera()

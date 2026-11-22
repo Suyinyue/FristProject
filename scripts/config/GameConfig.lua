@@ -267,6 +267,7 @@ GameConfig.Streaming = {
 -- 控制设置
 GameConfig.Controls = {
     MOUSE_SENSITIVITY = 0.1,          -- 鼠标灵敏度
+    INVERT_Y = false,                 -- 反转 Y 轴
     TOUCH_LOOK_SENSITIVITY = 0.15,    -- 触摸视角灵敏度
     TOUCH_TAP_MAX_DISTANCE = 10,      -- Tap 判定最大移动距离（设计像素）
     TOUCH_TAP_MAX_DURATION = 300,     -- Tap 判定最大时长（毫秒）

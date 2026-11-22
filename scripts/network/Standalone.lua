@@ -31,6 +31,10 @@ local ProjectileManager = require("items.ProjectileManager")
 local ItemSaveSystem = require("items.ItemSaveSystem")
 local TowerManager = require("building.TowerManager")
 local WeatherManager = require("world.WeatherManager")
+local MiningSystem = require("player.MiningSystem")
+local PauseMenu = require("ui.PauseMenu")
+local SettingsManager = require("save.SettingsManager")
+local SaveManager = require("save.SaveManager")
 
 require "urhox-libs.UI.GameHUD"
 
@@ -63,6 +67,12 @@ local projectileManager_ = nil
 local towerManager_ = nil
 ---@type WeatherManager|nil
 local weatherManager_ = nil
+---@type MiningSystem|nil
+local miningSystem_ = nil
+-- 暂停菜单/设置打开时冻结游戏世界（UI 仍可交互）
+local paused_ = false
+---@type PauseMenu|nil
+local pauseMenu_ = nil
 ---@type Node
 local cameraNode_ = nil
 ---@type Camera
@@ -143,6 +153,8 @@ function Standalone.Start()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
     SubscribeToEvent("MouseButtonDown", "HandleMouseButtonDown")
+    SubscribeToEvent("MouseButtonUp", "HandleMouseButtonUp")
+    SubscribeToEvent("MouseWheel", "HandleMouseWheel")
 
     print("[Standalone] Initial chunk loading started (async)...")
 end
@@ -246,6 +258,10 @@ function Standalone.OnWorldReady()
     itemDropSystem_ = ItemDropSystem.new(scene_, world_)
     projectileManager_ = ProjectileManager.new(scene_, world_)
     blockInteraction_:setItemSystems(itemDropSystem_, projectileManager_)
+
+    -- 持续挖掘系统（按住左键累积进度）
+    miningSystem_ = MiningSystem.new(player_, blockInteraction_, scene_,
+        GameSystems:getParticleSystem())
     blockInteraction_:setCraftingTableHandler(function()
         GameSystems:openCraftingTable()
     end)
@@ -365,6 +381,31 @@ function Standalone.OnWorldReady()
             biome = worldGenerator_.biome,
             uiRoot = ui and ui:getRoot() or nil,
         })
+    end
+
+    -- 设置：读取并应用（音量 / FOV / 灵敏度 / 渲染距离 / 自动保存…）
+    SettingsManager.load()
+    SettingsManager.apply({
+        player = player_,
+        chunkStreamer = chunkStreamer_,
+        uiManager = GameSystems:getUIManager(),
+    })
+
+    -- 暂停菜单 / 设置 / 存档界面（ESC）
+    pauseMenu_ = PauseMenu.new({
+        player = player_,
+        chunkStreamer = chunkStreamer_,
+        uiManager = GameSystems:getUIManager(),
+        onExit = function() engine:Exit() end,
+        buildSaveContext = function()
+            return Standalone.BuildSaveContext()
+        end,
+    })
+    pauseMenu_.onVisibilityChanged = function(visible)
+        paused_ = visible
+        if visible and miningSystem_ then
+            miningSystem_:stopMining()
+        end
     end
 
     -- 创建性能测试工具
@@ -561,6 +602,12 @@ function HandleUpdate(eventType, eventData)
         return
     end
 
+    -- 暂停菜单 / 设置 / 加载界面打开时：冻结世界（生物 AI、时间、天气、玩家、挖掘）
+    if paused_ then
+        if miningSystem_ then miningSystem_:stopMining() end
+        return
+    end
+
     -- 自爆闪光淡出
     for i = #explosionFlashes_, 1, -1 do
         local flash = explosionFlashes_[i]
@@ -591,6 +638,19 @@ function HandleUpdate(eventType, eventData)
     end
     if player_ then
         player_:update(timeStep)
+    end
+
+    -- 持续挖掘
+    if miningSystem_ then
+        if paused_ or GameSystems:isInventoryOpen() or (player_ and player_:isDead()) then
+            miningSystem_:stopMining()
+        else
+            miningSystem_:update(timeStep)
+        end
+        local mui = GameSystems:getUIManager()
+        if mui then
+            mui:setMiningProgress(miningSystem_:isMining() and miningSystem_:getProgress() or nil)
+        end
     end
 
     -- 区块流式加载（无限地形）
@@ -633,15 +693,24 @@ function HandleUpdate(eventType, eventData)
             if timeUiTimer_ >= 0.25 then
                 timeUiTimer_ = 0.0
                 ui:setGameTime(GameSystems:getTimeText())
+                if SettingsManager.data.game.showFps then
+                    ui:setFps(1.0 / math.max(timeStep, 0.0001))
+                end
             end
         end
     end
 
-    -- 物品自动存档
-    itemSaveTimer_ = itemSaveTimer_ + timeStep
-    if itemSaveTimer_ >= Config.Items.SAVE_INTERVAL then
-        itemSaveTimer_ = 0.0
-        ItemSaveSystem.save(player_, itemDropSystem_)
+    -- 自动保存：物品 + 完整世界（间隔可在设置中修改/关闭）
+    local gameSettings = SettingsManager.data.game
+    if gameSettings.autosave then
+        itemSaveTimer_ = itemSaveTimer_ + timeStep
+        if itemSaveTimer_ >= (gameSettings.autosaveInterval or 300) then
+            itemSaveTimer_ = 0.0
+            ItemSaveSystem.save(player_, itemDropSystem_)
+            local slot = SaveManager.getCurrentSlot() or "World_Auto"
+            SaveManager.saveWorld(Standalone.BuildSaveContext(), slot,
+                slot == "World_Auto" and "自动存档" or nil)
+        end
     end
 
     -- 更新共享子系统
@@ -654,6 +723,27 @@ end
 
 function HandleKeyDown(eventType, eventData)
     local key = eventData["Key"]:GetInt()
+
+    -- ESC：暂停菜单 / 从设置子页返回 / 关闭背包
+    if key == KEY_ESCAPE then
+        if pauseMenu_ then
+            if pauseMenu_:isOpen() then
+                pauseMenu_:back()
+            elseif GameSystems:isInventoryOpen() then
+                GameSystems.inventoryUI:toggle()
+                if GameSystems.hotbar then
+                    GameSystems.hotbar:update()
+                end
+            else
+                pauseMenu_:open()
+            end
+        end
+        return
+    end
+
+    if paused_ then
+        return
+    end
 
     -- Standalone 专属：性能测试按键
     if key == KEY_B and benchmark_ then
@@ -678,7 +768,11 @@ end
 function HandleMouseButtonDown(eventType, eventData)
     local button = eventData["Button"]:GetInt()
 
-    -- 左键：优先攻击瞄准的生物，否则破坏方块
+    if paused_ then
+        return
+    end
+
+    -- 左键：优先攻击瞄准的生物，否则开始持续挖掘
     if button == MOUSEB_LEFT and mobManager_ and player_ and not player_:isDead() then
         local target = mobManager_:findTargetMob(player_)
         if target then
@@ -688,6 +782,19 @@ function HandleMouseButtonDown(eventType, eventData)
             end
             return
         end
+    end
+
+    if button == MOUSEB_LEFT then
+        if paused_ or GameSystems:isInventoryOpen() then
+            return
+        end
+        if blockInteraction_ and blockInteraction_:tryDestroyTorch() then
+            return
+        end
+        if miningSystem_ then
+            miningSystem_:startMining()
+        end
+        return
     end
 
     -- 右键：优先尝试喂食动物（繁殖），否则走放置/使用物品
@@ -700,6 +807,30 @@ function HandleMouseButtonDown(eventType, eventData)
     end
 
     GameSystems:handleMouseButtonDown(button, blockInteraction_)
+end
+
+function HandleMouseButtonUp(eventType, eventData)
+    local button = eventData["Button"]:GetInt()
+    if button == MOUSEB_LEFT and miningSystem_ then
+        miningSystem_:stopMining()
+    end
+end
+
+function HandleMouseWheel(eventType, eventData)
+    if paused_ or GameSystems:isInventoryOpen() then
+        return
+    end
+    local delta = eventData["Wheel"]:GetInt()
+    if delta == 0 then
+        return
+    end
+    local hotbar = GameSystems.hotbar
+    if hotbar and player_ then
+        local index = player_:getSelectedSlotIndex()
+        index = index + (delta > 0 and 1 or -1)
+        if index > 9 then index = 1 elseif index < 1 then index = 9 end
+        hotbar:selectSlot(index)
+    end
 end
 
 -- ============================================================================
@@ -727,6 +858,10 @@ function Standalone.Stop()
     end
     -- 天气管理器没有持久节点；覆盖层随 UI 根节点一起销毁
     weatherManager_ = nil
+    if miningSystem_ then
+        miningSystem_:destroy()
+        miningSystem_ = nil
+    end
     if projectileManager_ then
         projectileManager_:destroy()
         projectileManager_ = nil
@@ -753,6 +888,31 @@ end
 ---@field mobManager MobManager
 ---@field towerManager TowerManager
 ---@field weatherManager WeatherManager|nil
+---@field blockInteraction BlockInteraction|nil
+---@field miningSystem MiningSystem|nil
+---@field pauseMenu PauseMenu|nil
+
+---构建存档/设置系统需要的运行时上下文
+---@return table
+function Standalone.BuildSaveContext()
+    return {
+        world = world_,
+        player = player_,
+        dayNightCycle = GameSystems:getDayNightCycle(),
+        weatherManager = weatherManager_,
+        mobManager = mobManager_,
+        itemDropSystem = itemDropSystem_,
+        chunkStreamer = chunkStreamer_,
+        chunkBuilder = chunkBuilder_,
+        torchDecorator = GameSystems:getTorchDecorator(),
+        towerManager = towerManager_,
+        scene = scene_,
+        playerController = playerController_,
+        blockInteraction = blockInteraction_,
+        miningSystem = miningSystem_,
+        uiManager = GameSystems:getUIManager(),
+    }
+end
 
 ---获取当前单机局内对象（供 scripts/devtools/*.lua 断言）
 ---@return DebugGameContext
@@ -764,6 +924,9 @@ function GetDebugGameContext()
         mobManager = mobManager_,
         towerManager = towerManager_,
         weatherManager = weatherManager_,
+        blockInteraction = blockInteraction_,
+        miningSystem = miningSystem_,
+        pauseMenu = pauseMenu_,
     }
 end
 
