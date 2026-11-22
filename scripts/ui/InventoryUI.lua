@@ -942,7 +942,14 @@ function InventoryUI:onHotbarSlotClick(n, event)
         self:onInventorySlotClick(self.inventory:getHotbarIndex(n), event)
         return
     end
-    self.player:selectSlot(n)
+    -- 光标有物品 → 放进这个快捷栏格（这样主背包的物品能挪到快捷栏拿出来用）；
+    -- 否则才把该格选为当前手持。
+    if self.cursorStack then
+        self:clickSlot(self.inventory:getSlot(self.inventory:getHotbarIndex(n)),
+            (event and event.button) or 0)
+    else
+        self.player:selectSlot(n)
+    end
     self.inventory:markDirty()
     self:refresh()
 end

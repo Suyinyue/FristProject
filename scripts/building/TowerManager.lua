@@ -48,7 +48,8 @@ local function getShieldMaterial()
         shieldMaterial = Material:new()
         shieldMaterial:SetTechnique(0, cache:GetResource("Technique", "Techniques/PBR/PBRNoTextureAlpha.xml"))
         local a = Config.Tower.SHIELD_ALPHA or 0.10
-        shieldMaterial:SetShaderParameter("MatDiffColor", Variant(Color(1.0, 0.55, 0.20, a)))
+        -- 深色橙红 + 更高不透明度，光罩更醒目（Design.md「攻击范围光罩提示」）
+        shieldMaterial:SetShaderParameter("MatDiffColor", Variant(Color(0.90, 0.28, 0.04, a)))
     end
     return shieldMaterial
 end
