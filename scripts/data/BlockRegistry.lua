@@ -775,7 +775,9 @@ BlockRegistry:register(66, "flame_stone", {
     textures = { top = T.flame_stone, side = T.flame_stone, bottom = T.flame_stone },
     hasLight = true,
     lightColor = Color(1.0, 0.55, 0.20),
-    lightRadius = 15,
+    -- 25 超出 0-15 的存储上限：addBlockLight 的 BFS 用原始值继续扩散（存储端钳到 15），
+    -- 所以前 ~10 格保持满亮度、再向外衰减，足够照亮 15 格攻击范围的光罩。
+    lightRadius = 25,
 })
 
 -- 金刚岩 67：防御塔基座

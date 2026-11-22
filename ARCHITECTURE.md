@@ -616,7 +616,7 @@ blockId
 - 锁定目标后发射**独立轨迹火焰弹**（`spawnProjectile`）：自发光小球，速度 `PROJECTILE_SPEED=10` 格/秒，持续追踪目标当前位置，命中判定半径 `PROJECTILE_HIT_RADIUS=0.9` 格。
 - 命中造成 `ATTACK_DAMAGE=500` 伤害（`mob:takeDamage(500)`，按护甲结算）；目标死亡/出范围/失效则重新选目标。
 - 视觉：火焰弹 + 塔顶点光源呼吸 + **半透明光罩**（`Sphere.mdl`，半径 = 攻击范围，`SHIELD_ALPHA` 调透明度）。
-- 火焰石方块本身也发光（blockLight 半径 12）。
+- 火焰石方块本身也发光：`lightRadius=25`（存储钳到 15，但 BFS 按原始值扩散，前 ~10 格满亮度再向外衰减，足以照亮 15 格攻击范围）。
 - 防御塔重建触发：
   - 玩家放置/破坏圆石或火焰石（`BlockInteraction` → `onBlockChanged`）
   - 炸弹人自爆清方块（`MobManager.onBlocksCleared` → `rebuildTowers`）
@@ -979,7 +979,7 @@ npx -y @taptap/maker preview validate --mode validate \
 - 持续挖掘（`MiningSystem` + `MiningRules`，进度条 + 裂纹 + 掉落进背包）
 - 暂停菜单 / 设置界面（`PauseMenu` + `SettingsManager`，音量/FOV/渲染距离/灵敏度等持久化到 `settings.json`）
 - 世界存档系统（`SaveManager`，区块 RLE + 玩家/生物/掉落/时间/天气，目录 `saves/<World_xxx>/`）
-- 防御塔基座改为圆石 + 攻击改为独立火焰弹轨迹（伤害 500、间隔 2s、速度 10 格/秒）；点光源照亮整片攻击范围、火焰石 blockLight 提到 15
+- 防御塔基座改为圆石 + 攻击改为独立火焰弹轨迹（伤害 500、间隔 2s、速度 10 格/秒）；点光源照亮整片攻击范围、火焰石 blockLight 提到 25（覆盖整片光罩）
 - 修复玩家贴边/拐角/下落时卡进方块：`PlayerController` 增加每帧 AABB 去穿透（`resolveOverlap`）
 - 修复背包物品放不进快捷栏的 bug（光标有物品时点击快捷栏格会放入）
 - 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck / DayNightCheck / WeatherCheck / SurvivalCheck / MiningCheck / SaveLoadCheck

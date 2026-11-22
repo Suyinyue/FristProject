@@ -8,6 +8,7 @@ local Blocks = require("data.BlockRegistry")
 local Inventory = require("items.Inventory")
 local FirstPersonArm = require("player.FirstPersonArm")
 local PlayerBody = require("player.PlayerBody")
+local AudioManager = require("core.AudioManager")
 
 ---@class Player
 ---@field scene Scene
@@ -435,6 +436,12 @@ function Player:takeDamage(rawAttack)
         self.health = 0
         self.dead = true
     end
+
+    if self.dead then
+        AudioManager.play("player_defeat")
+    else
+        AudioManager.play("player_hurt")
+    end
 end
 
 ---当前护甲（基础 + 四件装备加成）
@@ -522,6 +529,7 @@ function Player:attackMob(mob)
     mob:takeDamage(self:getAttack())
     self.attackCooldown = Config.Player.ATTACK_COOLDOWN
     self:damageSelected(Config.Items.ATTACK_DURABILITY_COST)
+    AudioManager.play("sword_hit")
     return true
 end
 

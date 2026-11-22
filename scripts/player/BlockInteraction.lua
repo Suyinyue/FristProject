@@ -13,6 +13,7 @@ local ItemBehaviors = require("items.ItemBehaviors")
 local ItemStack = require("items.ItemStack")
 local ItemRegistry = require("items.ItemRegistry")
 local Events = require("config.GameEvents")
+local AudioManager = require("core.AudioManager")
 
 -- 常量本地化（热路径优化）
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
@@ -378,6 +379,9 @@ function BlockInteraction:destroyBlockLocal(bx, by, bz)
     if self.particleSystem then
         self.particleSystem:spawnBreakParticles(bx, by, bz, blockType)
     end
+
+    -- 破坏音效（按方块材质区分）
+    AudioManager.playBlockBreak(blockType)
 
     -- 掉落物 + 工具耐久（需要的工具不对时仍能破坏，但不掉落）
     local heldTool = nil

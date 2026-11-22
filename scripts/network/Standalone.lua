@@ -35,6 +35,7 @@ local MiningSystem = require("player.MiningSystem")
 local PauseMenu = require("ui.PauseMenu")
 local SettingsManager = require("save.SettingsManager")
 local SaveManager = require("save.SaveManager")
+local AudioManager = require("core.AudioManager")
 
 require "urhox-libs.UI.GameHUD"
 
@@ -390,6 +391,9 @@ function Standalone.OnWorldReady()
         chunkStreamer = chunkStreamer_,
         uiManager = GameSystems:getUIManager(),
     })
+
+    -- 音频：背景音乐 + 音效（在设置音量应用后启动）
+    AudioManager.init(scene_)
 
     -- 暂停菜单 / 设置 / 存档界面（ESC）
     pauseMenu_ = PauseMenu.new({

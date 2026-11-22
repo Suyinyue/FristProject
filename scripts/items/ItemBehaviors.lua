@@ -17,6 +17,7 @@
 local Config = require("config.GameConfig")
 local Blocks = require("data.BlockRegistry")
 local ItemStack = require("items.ItemStack")
+local AudioManager = require("core.AudioManager")
 
 local ItemBehaviors = {}
 
@@ -196,6 +197,7 @@ local function useBow(ctx)
     ctx.projectiles:spawnArrow(eye + dir * 1.2, dir, ctx.player:getAttack())
     inventory:damageSlot(ctx.slotIndex, 1)
     ctx.player:swingArm()
+    AudioManager.play("bow_release")
     return true
 end
 

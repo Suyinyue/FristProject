@@ -12,6 +12,7 @@ local Config = require("config.GameConfig")
 local HealthBar = require("entity.HealthBar")
 local MobModel = require("entity.MobModel")
 local AIController = require("entity.ai.AIController")
+local AudioManager = require("core.AudioManager")
 
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
 
@@ -130,6 +131,10 @@ function Mob:takeDamage(rawAttack)
         self.dead = true
     end
     self.healthBar:setHealth(self.health, self.maxHealth)
+
+    if self.mobType == "ZOMBIE" then
+        AudioManager.play("zombie_hurt")
+    end
 end
 
 ---直接杀死（自爆等不经过普通伤害判定的死亡）

@@ -21,6 +21,7 @@
 local AIStateMachine = require("entity.ai.AIStateMachine")
 local Pathfinding = require("entity.ai.Pathfinding")
 local Config = require("config.GameConfig")
+local AudioManager = require("core.AudioManager")
 
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
 local AI = Config.MobAI
@@ -174,6 +175,10 @@ function AIController:acquireTarget(player)
     self.lastTargetZ = player:getPosition().z
     self.path = nil
     self.pathIndex = 1
+
+    if self.mob.mobType == "ZOMBIE" then
+        AudioManager.play("zombie_alert")
+    end
 end
 
 ---目标是否仍有效（存活且在保持范围内）
@@ -448,6 +453,9 @@ function AIController:doAttack(player)
     if self.def.explodes and self.mob.onExplode then
         self.mob.onExplode(self.mob, player)
         return
+    end
+    if self.mob.mobType == "ZOMBIE" then
+        AudioManager.play("zombie_attack")
     end
     player:takeDamage(self.def.attack)
 end
