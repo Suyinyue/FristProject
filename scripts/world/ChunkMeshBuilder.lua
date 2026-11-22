@@ -313,8 +313,12 @@ end
 ---发射一个 solid 面（6 顶点，含 AO 顶点色），返回新增顶点数。
 ---F1：sync / async 两条路径共用同一发射逻辑（现已统一走 buildRange → emitBlockAt），
 ---后续 Phase B 接入光照只需改这一处，消除双副本分叉风险。
--- L2 光照：最低环境光系数，防止凹处/地下全黑（无昼夜时白天 sky=15→shade=1，地下 sky=0→MIN_AMBIENT）
-local MIN_AMBIENT = 0.05
+-- L2 光照：最低环境光系数。黑暗处（洞穴 / 封闭室内 / 阴影里）不再渲染成纯黑，
+-- 而是保留一个基础亮度，保证方块纹理与轮廓可见。0.05 在 PBR + 环境光下仍然接近全黑，
+-- 实际观感就是「没光的地方方块变黑」，因此抬到 0.35；光照等级 0-15 仍照常用于玩法判定。
+-- 这个下限是最终亮度的加法基线（见 emitSolidFace），不会被 AO 再乘一次，否则 AO 角落仍会发黑。
+local MIN_AMBIENT = 0.35
+local AMBIENT_SCALE = 1 - MIN_AMBIENT
 
 local function emitSolidFace(geometry, face, worldBaseX, worldBaseY, worldBaseZ,
                             blockType, lx, lz, y, blocks, blocksNX, blocksPX, blocksNZ, blocksPZ,
@@ -335,11 +339,13 @@ local function emitSolidFace(geometry, face, worldBaseX, worldBaseY, worldBaseZ,
     local bl = world:getBlockLight(nbx, nby, nbz)                         -- 方块光(火把)不随昼夜
     if bl > lv then lv = bl end                 -- max(sky×sun, block)
     if lv > 15 then lv = 15 end                 -- sunFactor>1 时钳制，防顶点色分量溢出/过曝
-    local shade = lv / 15
-    if shade < MIN_AMBIENT then shade = MIN_AMBIENT end
+    local shade = lv / 15                    -- 光照系数 0..1（纯净，不含环境光下限）
+    -- 最终亮度 = MIN_AMBIENT + (1-MIN_AMBIENT) × 光照 × AO：
+    -- 先把光照与 AO 相乘，再抬到环境光基线，这样全黑处无论 AO 多强都至少是 MIN_AMBIENT。
+    local shaded = MIN_AMBIENT + AMBIENT_SCALE * shade
     -- 无 AO 时预算一个 shaded white 常量，避免顶点循环内每顶点分配 Color
     -- （AO 开启时各顶点档色不同，无法预算，仍需逐顶点构造）
-    local shadedWhite = (not aoCols) and Color(shade, shade, shade, 1) or nil
+    local shadedWhite = (not aoCols) and Color(shaded, shaded, shaded, 1) or nil
     for vi = 1, VERTICES_PER_FACE do
         local v = vertices[vi]
         local vpos, vuv = v.pos, v.uv
@@ -354,10 +360,14 @@ local function emitSolidFace(geometry, face, worldBaseX, worldBaseY, worldBaseZ,
             u0 + vuv[1] * (u1 - u0),
             v0 + vuv[2] * (v1 - v0)
         ))
-        -- AO 档色 × 光照 shade（合流：LitSolid 顶点色乘 albedo，等价同时调制环境光+直射光）
+        -- AO 档色 × 光照 shade，再叠加环境光基线（顶点色乘 albedo，等价同时调制环境光+直射光）
         if aoCols then
             local ao = aoCols[vi]
-            geometry:DefineColor(Color(ao.r * shade, ao.g * shade, ao.b * shade, 1))
+            geometry:DefineColor(Color(
+                MIN_AMBIENT + AMBIENT_SCALE * ao.r * shade,
+                MIN_AMBIENT + AMBIENT_SCALE * ao.g * shade,
+                MIN_AMBIENT + AMBIENT_SCALE * ao.b * shade,
+                1))
         else
             geometry:DefineColor(shadedWhite)
         end
@@ -550,9 +560,8 @@ local function shapeShade(ctx, lx, lz, y)
     end
 
     if best > 15 then best = 15 end
-    local shade = best / 15
-    if shade < MIN_AMBIENT then shade = MIN_AMBIENT end
-    return shade
+    -- 与整格方块一致：最终亮度同样抬到环境光基线，黑暗处不会渲染成纯黑
+    return MIN_AMBIENT + AMBIENT_SCALE * (best / 15)
 end
 
 ---栅栏的邻接掩码（+X=1 -X=2 +Z=4 -Z=8）

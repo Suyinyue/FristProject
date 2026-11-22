@@ -208,6 +208,8 @@ OnWorldReady()
   - 天空光按列向下灌注，水平 BFS 传播；
   - 方块光从 `hasLight` 方块（火把/萤石/岩浆/火焰石）BFS 衰减；
   - 性能注意：方块光只允许在**已生成数据的区块**间传播，否则会灌满未生成区域（曾经是加载卡顿的根因）。
+  - 渲染亮度 = `MIN_AMBIENT + (1-MIN_AMBIENT) × (光照/15) × AO`，`MIN_AMBIENT=0.35` 定义在 `ChunkMeshBuilder.lua`：
+    环境光下限在乘完 AO/光照后才叠加，洞穴/封闭室内/阴影处不会渲染成纯黑；0~15 光照值本身仍用于玩法判定。
 - 方块形状：`data/BlockShapes.lua` 用 AABB 盒子描述半砖、楼梯、栅栏、墙、门、活板门；`World:getShapeBoxes` / `getSurfaceTopY` / `isSolidAtPoint` 供碰撞与相机使用。
 
 ### 4.2 地形生成（WorldGenerator）
