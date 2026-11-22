@@ -152,6 +152,76 @@ CraftingRecipes.recipes = {
         shapeless = { "block:30", "coal", "coal", "coal" },
         result = { id = "block:66", count = 1 },
     },
+
+    -- ==================== 熔炉 / 容器 / 附魔 / 农业 / 红石 ====================
+    {
+        -- 8 圆石围一圈 → 熔炉
+        id = "furnace",
+        shape = { "CCC", "C C", "CCC" },
+        key = { C = "block:13" },
+        result = { id = "block:23", count = 1 },
+    },
+    {
+        -- 8 木板围一圈 → 箱子
+        id = "chest",
+        shape = { "PPP", "P P", "PPP" },
+        key = { P = "block:19" },
+        result = { id = "block:73", count = 1 },
+    },
+    {
+        -- 4 黑曜石 + 2 钻石 + 1 书架 → 附魔台
+        id = "enchanting_table",
+        shapeless = { "block:17", "block:17", "block:17", "block:17", "diamond", "diamond", "block:21" },
+        result = { id = "block:74", count = 1 },
+    },
+    {
+        -- 2 铁锭 + 2 木棍 → 锄头
+        id = "hoe",
+        shape = { "II ", " S ", " S " },
+        key = { I = "iron_ingot", S = "stick" },
+        result = { id = "hoe", count = 1 },
+    },
+    {
+        -- 3 木棍 + 2 线 → 钓鱼竿
+        id = "fishing_rod",
+        shape = { "  S", " SL", "S L" },
+        key = { S = "stick", L = "string" },
+        result = { id = "fishing_rod", count = 1 },
+    },
+    {
+        -- 9 红石粉 → 红石块
+        id = "redstone_block",
+        shape = { "RRR", "RRR", "RRR" },
+        key = { R = "redstone" },
+        result = { id = "block:79", count = 1 },
+    },
+    {
+        -- 4 红石粉 + 1 萤石 → 红石灯
+        id = "redstone_lamp",
+        shape = { " R ", "RGR", " R " },
+        key = { R = "redstone", G = "block:30" },
+        result = { id = "block:82", count = 1 },
+    },
+    {
+        -- 1 红石粉 + 1 木棍 → 红石火把
+        id = "redstone_torch",
+        shape = { "R", "S" },
+        key = { R = "redstone", S = "stick" },
+        result = { id = "block:78", count = 1 },
+    },
+    {
+        -- 1 木棍 + 1 圆石 → 拉杆
+        id = "lever",
+        shape = { "S", "C" },
+        key = { S = "stick", C = "block:13" },
+        result = { id = "block:80", count = 1 },
+    },
+    {
+        -- 1 石头 → 石按钮
+        id = "stone_button",
+        shapeless = { "block:3" },
+        result = { id = "block:81", count = 1 },
+    },
 }
 
 return CraftingRecipes

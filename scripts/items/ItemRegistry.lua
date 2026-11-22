@@ -45,7 +45,7 @@ local ItemRegistry = {
 local VALID_BEHAVIORS = {
     material = true, food = true, weapon = true, tool = true,
     block = true, potion = true, bow = true, bucket = true,
-    water_bucket = true, armor = true,
+    water_bucket = true, armor = true, fishing_rod = true,
 }
 
 ---注册一个物品定义（重复 ID 会覆盖）

@@ -31,6 +31,7 @@ local REQUIRED_TOOL = {
     [Blocks.LAPIS_ORE] = "pickaxe",
     [Blocks.GLOWSTONE] = "pickaxe",
     [Blocks.FURNACE] = "pickaxe",
+    [Blocks.LIT_FURNACE] = "pickaxe",   -- 燃烧态熔炉也需镐
     [Blocks.ICE] = "pickaxe",
     [Blocks.WALL_COBBLESTONE] = "pickaxe",
     [Blocks.ADAMANT] = "pickaxe",       -- 金刚岩（防御塔基座）
@@ -65,6 +66,8 @@ local BLOCK_DROPS = {
     [Blocks.GOLD_ORE] = "raw_gold",
     [Blocks.DIAMOND_ORE] = "diamond",
     [Blocks.LEAVES] = "block:45",         -- 树苗
+    [Blocks.LIT_FURNACE] = "block:23",    -- 燃烧熔炉挖掉掉落普通熔炉
+    [Blocks.FARMLAND] = "block:2",        -- 耕地挖掉掉落泥土
 }
 
 -- 明确不掉的方块
@@ -73,6 +76,7 @@ local NO_DROP = {
     [Blocks.TALL_GRASS] = true,
     [Blocks.BEDROCK] = true,
     [Blocks.LEAVES] = false,
+    [Blocks.WHEAT_CROP] = true,   -- 小麦作物的掉落由 FarmingManager 按成熟度决定
 }
 
 ---方块需要的工具类型

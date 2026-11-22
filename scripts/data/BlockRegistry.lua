@@ -818,6 +818,120 @@ BlockRegistry:register(71, "flame_stone_ore", {
 })
 
 -- ============================================
+-- 烧炼 / 容器 / 附魔 / 农业 / 红石（Design.md「Minecraft 未实现功能」）
+-- 方块 ID 从 72 顺延；纹理暂时复用已有 tile（占位），后续可替换为独立贴图。
+-- ============================================
+
+-- 燃烧态熔炉 72：燃烧时把 FURNACE(23) 换成本方块（发光），熄灭换回
+BlockRegistry.LIT_FURNACE = 72
+BlockRegistry:register(72, "lit_furnace", {
+    displayName = "Lit Furnace",
+    color = Color(0.62, 0.36, 0.16),
+    textures = { top = T.furnace_top, side = T.furnace_side, bottom = T.furnace_top },
+    hasLight = true,
+    lightColor = Color(1.0, 0.55, 0.20),
+    lightRadius = 13,
+})
+
+-- 箱子 73
+BlockRegistry.CHEST = 73
+BlockRegistry:register(73, "chest", {
+    displayName = "Chest",
+    color = Color(0.66, 0.45, 0.22),
+    textures = { top = T.planks, side = T.crafting_side, bottom = T.planks },
+})
+
+-- 附魔台 74
+BlockRegistry.ENCHANTING_TABLE = 74
+BlockRegistry:register(74, "enchanting_table", {
+    displayName = "Enchanting Table",
+    color = Color(0.20, 0.14, 0.22),
+    textures = { top = T.obsidian, side = T.obsidian, bottom = T.obsidian },
+})
+
+-- 耕地 75
+BlockRegistry.FARMLAND = 75
+BlockRegistry:register(75, "farmland", {
+    displayName = "Farmland",
+    color = Color(0.44, 0.28, 0.16),
+    textures = { top = T.dirt, side = T.dirt, bottom = T.dirt },
+})
+
+-- 小麦作物 76（交叉网格，生长阶段 0..7 存 blockState）
+BlockRegistry.WHEAT_CROP = 76
+BlockRegistry:register(76, "wheat_crop", {
+    displayName = "Wheat Crop",
+    color = Color(0.55, 0.70, 0.25),
+    textures = { top = T.tall_grass, side = T.tall_grass, bottom = T.tall_grass },
+    solid = false,
+    transparent = true,
+    crossMesh = true,
+})
+
+-- 红石粉 77（平铺，信号 0..15 存 blockState）
+BlockRegistry.REDSTONE_DUST = 77
+BlockRegistry:register(77, "redstone_dust", {
+    displayName = "Redstone Dust",
+    color = Color(0.85, 0.15, 0.12),
+    textures = { top = T.redstone_ore, side = T.redstone_ore, bottom = T.redstone_ore },
+    solid = false,
+    transparent = true,
+    crossMesh = true,
+})
+
+-- 红石火把 78（常亮信号源）
+BlockRegistry.REDSTONE_TORCH = 78
+BlockRegistry:register(78, "redstone_torch", {
+    displayName = "Redstone Torch",
+    color = Color(0.90, 0.25, 0.18),
+    textures = { top = T.torch, side = T.torch, bottom = T.torch },
+    solid = false,
+    transparent = true,
+    crossMesh = true,
+    hasLight = true,
+    lightColor = Color(1.0, 0.30, 0.20),
+    lightRadius = 8,
+})
+
+-- 红石块 79（恒为强信号源）
+BlockRegistry.REDSTONE_BLOCK = 79
+BlockRegistry:register(79, "redstone_block", {
+    displayName = "Redstone Block",
+    color = Color(0.78, 0.12, 0.10),
+    textures = { top = T.redstone_ore, side = T.redstone_ore, bottom = T.redstone_ore },
+})
+
+-- 拉杆 80（开关输入，blockState 存 on/off）
+BlockRegistry.LEVER = 80
+BlockRegistry:register(80, "lever", {
+    displayName = "Lever",
+    color = Color(0.60, 0.52, 0.40),
+    textures = { top = T.stone, side = T.stone, bottom = T.stone },
+    solid = false,
+    transparent = true,
+    crossMesh = true,
+})
+
+-- 石按钮 81（脉冲输入，blockState 存 pressed）
+BlockRegistry.STONE_BUTTON = 81
+BlockRegistry:register(81, "stone_button", {
+    displayName = "Stone Button",
+    color = Color(0.55, 0.55, 0.55),
+    textures = { top = T.stone, side = T.stone, bottom = T.stone },
+    solid = false,
+    transparent = true,
+    crossMesh = true,
+})
+
+-- 红石灯 82（受信号点亮，亮/灭用 blockState；实际光照由 RedstoneManager 注入）
+BlockRegistry.REDSTONE_LAMP = 82
+BlockRegistry:register(82, "redstone_lamp", {
+    displayName = "Redstone Lamp",
+    color = Color(1.0, 0.80, 0.40),
+    textures = { top = T.glowstone, side = T.glowstone, bottom = T.glowstone },
+})
+
+-- ============================================
 -- 新增方块示例（只需一行注册！）
 -- ============================================
 -- 1. 在 rendering/texturepacks/AtlasLayout.lua 的 ROWS 里加一个 tile 名字

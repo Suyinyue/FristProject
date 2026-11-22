@@ -84,6 +84,15 @@ BlockPalette.pages = {
             Blocks.ADAMANT, Blocks.FLAME_STONE,
         },
     },
+    {
+        name = "设备与红石",
+        blocks = {
+            Blocks.CHEST, Blocks.ENCHANTING_TABLE,
+            Blocks.FARMLAND, Blocks.WHEAT_CROP,
+            Blocks.REDSTONE_DUST, Blocks.REDSTONE_TORCH, Blocks.REDSTONE_BLOCK,
+            Blocks.LEVER, Blocks.STONE_BUTTON, Blocks.REDSTONE_LAMP,
+        },
+    },
 }
 
 ---@return number 页数

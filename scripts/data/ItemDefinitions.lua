@@ -45,6 +45,9 @@ local BLOCK_NAMES_ZH = {
     [45] = "树苗", [46] = "枯木", [47] = "红蘑菇", [48] = "棕蘑菇",
     [61] = "木栅栏", [62] = "圆石墙", [63] = "木门", [64] = "铁门", [65] = "活板门",
     [66] = "火焰石", [67] = "金刚岩",
+    [72] = "燃烧熔炉", [73] = "箱子", [74] = "附魔台", [75] = "耕地", [76] = "小麦作物",
+    [77] = "红石粉", [78] = "红石火把", [79] = "红石块", [80] = "拉杆", [81] = "石按钮",
+    [82] = "红石灯",
 }
 
 -- 非方块物品（顺序 = 创造模式「物品」页的顺序）
@@ -143,6 +146,40 @@ ItemDefinitions.items = {
       behavior = "bucket", description = "右键水源可以装满水" },
     { id = "water_bucket", name = "水桶", icon = "水", color = { 0.25, 0.55, 0.90 }, category = "bucket", maxStack = 1,
       behavior = "water_bucket", description = "右键地面放置水源" },
+
+    -- ==================== 烧炼 / 附魔 / 红石材料 ====================
+    { id = "copper_ingot", name = "铜锭", icon = "铜", color = { 0.85, 0.48, 0.28 }, category = "material", maxStack = 64,
+      behavior = "material", description = "铜矿石烧炼得到的金属锭" },
+    { id = "emerald", name = "绿宝石", icon = "绿", color = { 0.18, 0.78, 0.38 }, category = "material", maxStack = 64,
+      behavior = "material", description = "稀有的绿色宝石" },
+    { id = "redstone", name = "红石粉", icon = "红", color = { 0.85, 0.15, 0.12 }, category = "material", maxStack = 64,
+      behavior = "material", description = "红石矿石烧炼得到的粉末，可以铺设电路" },
+    { id = "lapis_lazuli", name = "青金石", icon = "青", color = { 0.18, 0.32, 0.78 }, category = "material", maxStack = 64,
+      behavior = "material", description = "附魔需要消耗的材料" },
+    { id = "charcoal", name = "木炭", icon = "炭", color = { 0.20, 0.18, 0.16 }, category = "material", maxStack = 64,
+      behavior = "material", description = "原木烧炼得到的燃料" },
+    { id = "wheat_seed", name = "小麦种子", icon = "种", color = { 0.78, 0.72, 0.40 }, category = "material", maxStack = 64,
+      behavior = "material", description = "种在耕地上可以长出小麦，也能喂鸡" },
+
+    -- ==================== 熟肉 / 鱼 ====================
+    { id = "cooked_beef", name = "熟牛肉", icon = "牛", color = { 0.55, 0.34, 0.24 }, category = "food", maxStack = 64,
+      behavior = "food", description = "烤熟的牛肉，恢复大量饥饿值", foodHunger = 8, foodHeal = 2 },
+    { id = "cooked_porkchop", name = "熟猪肉", icon = "猪", color = { 0.68, 0.44, 0.40 }, category = "food", maxStack = 64,
+      behavior = "food", description = "烤熟的猪肉，恢复大量饥饿值", foodHunger = 8, foodHeal = 2 },
+    { id = "cooked_chicken", name = "熟鸡肉", icon = "鸡", color = { 0.80, 0.62, 0.38 }, category = "food", maxStack = 64,
+      behavior = "food", description = "烤熟的鸡肉，恢复饥饿值", foodHunger = 6, foodHeal = 2 },
+    { id = "raw_fish", name = "生鱼", icon = "鱼", color = { 0.60, 0.72, 0.80 }, category = "food", maxStack = 64,
+      behavior = "food", description = "钓鱼获得的生鱼", foodHunger = 2, foodHeal = 1 },
+    { id = "cooked_fish", name = "熟鱼", icon = "鱼", color = { 0.82, 0.66, 0.40 }, category = "food", maxStack = 64,
+      behavior = "food", description = "烤熟的鱼，恢复饥饿值", foodHunger = 6, foodHeal = 2 },
+
+    -- ==================== 锄头 / 钓鱼竿 ====================
+    { id = "hoe", name = "锄头", icon = "锄", color = { 0.62, 0.66, 0.70 }, category = "tool", maxStack = 1,
+      durability = 250, behavior = "tool", toolType = "hoe", attackBonus = 15,
+      description = "右键泥土/草方块可以耕地" },
+    { id = "fishing_rod", name = "钓鱼竿", icon = "竿", color = { 0.60, 0.46, 0.28 }, category = "tool", maxStack = 1,
+      durability = 64, behavior = "fishing_rod", attackBonus = 5,
+      description = "右键水面抛竿，等待咬钩后再右键收杆" },
 }
 
 -- ====================================================================

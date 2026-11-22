@@ -173,6 +173,7 @@ GameConfig.Items = {
 GameConfig.FoodSaturation = {
     apple = 4, bread = 6, beef = 2, porkchop = 2, chicken_meat = 2, rotten_flesh = 0,
     cooked_beef = 8, cooked_porkchop = 8, cooked_chicken = 6,
+    raw_fish = 1, cooked_fish = 6,
 }
 
 -- 经验值（Design.md「经验值与等级」）
@@ -344,6 +345,113 @@ GameConfig.Terrain = {
 GameConfig.Effects = {
     -- 窒息盒子：相机穿入固体方块时显示方块内部视图（穿墙保护）
     SUFFOCATION_BOX_ENABLED = false,
+}
+
+-- ============================================
+-- 熔炉与烧炼（Design.md「熔炉与烧炼系统」）
+-- ============================================
+GameConfig.Furnace = {
+    COOK_TIME = 8.0,           -- 每烧一件成品耗时（秒）
+    MAX_INPUT = 64,
+    MAX_FUEL = 64,
+    MAX_OUTPUT = 64,
+    UPDATE_BUDGET = 16,        -- 每帧最多推进多少台熔炉（性能兜底）
+}
+
+-- 燃料：物品 ID → 可烧炼的「成品件数」（1 件 = 1 个 COOK_TIME）
+GameConfig.Fuel = {
+    coal = 8,
+    charcoal = 8,
+    stick = 0.5,
+    ["block:4"] = 2,           -- 原木
+    ["block:19"] = 1.5,        -- 木板
+    ["block:23"] = 8,          -- 熔炉（简化，允许按比例折算）
+}
+
+-- 烧炼配方：输入物品 ID → 输出 { id, count }
+GameConfig.Smelting = {
+    ["block:25"] = { id = "iron_ingot", count = 1 },      -- 铁矿石 → 铁锭
+    ["block:26"] = { id = "gold_ingot", count = 1 },      -- 金矿石 → 金锭
+    ["block:68"] = { id = "copper_ingot", count = 1 },    -- 铜矿石 → 铜锭
+    ["block:27"] = { id = "diamond", count = 1 },         -- 钻石矿石 → 钻石
+    ["block:24"] = { id = "coal", count = 1 },            -- 煤矿石 → 煤炭
+    ["block:28"] = { id = "redstone", count = 4 },        -- 红石矿石 → 红石粉
+    ["block:29"] = { id = "lapis_lazuli", count = 4 },    -- 青金石矿石 → 青金石
+    ["block:69"] = { id = "emerald", count = 1 },         -- 绿宝石矿石 → 绿宝石
+    ["raw_iron"] = { id = "iron_ingot", count = 1 },      -- 粗铁 → 铁锭
+    ["raw_gold"] = { id = "gold_ingot", count = 1 },      -- 粗金 → 金锭
+    ["block:6"]  = { id = "block:38", count = 1 },        -- 沙 → 玻璃
+    ["block:13"] = { id = "block:3", count = 1 },         -- 圆石 → 石头
+    ["block:32"] = { id = "block:20", count = 1 },        -- 黏土 → 砖块
+    ["block:4"]  = { id = "charcoal", count = 1 },        -- 原木 → 木炭
+    ["beef"]         = { id = "cooked_beef", count = 1 },
+    ["porkchop"]     = { id = "cooked_porkchop", count = 1 },
+    ["chicken_meat"] = { id = "cooked_chicken", count = 1 },
+    ["raw_fish"]     = { id = "cooked_fish", count = 1 },
+}
+
+-- ============================================
+-- 箱子与容器（Design.md「箱子与容器存储系统」）
+-- ============================================
+GameConfig.Container = {
+    CHEST_SLOTS = 27,
+}
+
+-- ============================================
+-- 附魔（Design.md「附魔系统」）
+-- ============================================
+GameConfig.Enchanting = {
+    MAX_BOOKSHELF_RANGE = 2,
+    BOOKSHELF_PER_LEVEL = 15,
+    BASE_COST = 1,
+    MAX_COST = 30,
+    LAPIS_MAX = 3,
+    OPTION_COUNT = 3,
+}
+
+-- ============================================
+-- 农业种植（Design.md「农业种植系统」）
+-- ============================================
+GameConfig.Farming = {
+    STAGES = 7,                 -- 生长阶段 0..7
+    MATURE_STAGE = 7,
+    TICK_INTERVAL = 0.5,        -- 随机 tick 检查间隔（秒）
+    TICK_CHANCE = 0.3,          -- 每次 tick 单个作物生长的概率
+    TICK_BUDGET = 16,           -- 每 tick 最多处理多少个作物
+    GROW_ACCEL_WET = 2.0,       -- 湿润时生长概率倍率
+    WATER_RANGE = 4,            -- 附近水源判定范围（格）
+    NEED_LIGHT = 8,             -- 生长所需最低光照
+}
+
+-- ============================================
+-- 钓鱼（Design.md「钓鱼系统」）
+-- ============================================
+GameConfig.Fishing = {
+    CAST_REQUIRES_WATER = true,
+    BITE_MIN = 5.0,
+    BITE_MAX = 15.0,
+    REEL_WINDOW = 2.0,
+    ROD_DURABILITY_COST = 1,
+    BOB_DISTANCE = 6.0,         -- 浮漂落点距玩家（格）
+}
+
+-- 钓获表：物品 ID → 权重
+GameConfig.FishingLoot = {
+    { id = "raw_fish", weight = 60 },
+    { id = "stick", weight = 12 },
+    { id = "string", weight = 8 },
+    { id = "leather", weight = 6 },
+    { id = "apple", weight = 4 },
+    { id = "diamond", weight = 1 },
+}
+
+-- ============================================
+-- 红石（Design.md「红石系统（简化版）」）
+-- ============================================
+GameConfig.Redstone = {
+    MAX_SIGNAL = 15,
+    UPDATE_BUDGET = 256,        -- BFS 节点预算
+    BUTTON_PULSE = 1.0,         -- 按钮按下后复位的秒数
 }
 
 return GameConfig
