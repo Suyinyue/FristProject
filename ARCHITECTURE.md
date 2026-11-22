@@ -589,33 +589,36 @@ blockId
 
 ### 8.1 规则（Design.md）
 
-- 基座由**金刚岩**构成；从塔顶往下第 k 层必须正好有 **3×k** 块：顶层 3、第二层 6、第三层 9……
-- 每层必须是同一 y 平面上的**连通块**，且上一层每块正下方必须有金刚岩（不能悬空）。
+- 基座由**圆石**构成；从塔顶往下第 k 层必须正好有 **3×k** 块：顶层 3、第二层 6、第三层 9……
+- 每层必须是同一 y 平面上的**连通块**，且上一层每块正下方必须有圆石（不能悬空）。
 - 塔顶攻击台 = **火焰石**，必须放在基座顶层上。
 - 基座 n 层 → 攻击范围 **3n 格**（世界单位 = `3n * BLOCK_SIZE`）。
 - 同一基座放多个火焰石：**只激活层数最多（范围最大）的火焰石**；同层数按坐标固定选一个。
 
-> ⚠️ **与最新 Design.md 的差距**：`Design.md` 最新版要求「攻击间隔 2 秒 / 伤害 10 / 火焰弹速度 10 格每秒 / 独立火焰弹轨迹」，并要求「基座中间缺失一层时不能激活」。当前实现是 **500 伤害 / 1 秒间隔 / 瞬时光束**；检测从火焰石向下逐层进行，遇到缺层会**在当前层数处停止并按较短塔激活**，而不是判定整个基座不合法。其余规则（3k 块/层、3n 范围、多火焰石只激活范围最大者、动态重算）已实现。详见 §14.2。
+> **已对齐（2026-11-22）**：基座方块改为**圆石**（原金刚岩）；攻击改为**独立火焰弹轨迹**（速度 10 格/秒，命中结算），
+> 攻击间隔 2 秒、攻击伤害 10（`mob:takeDamage(10)`，仍按护甲结算）。
+> 仍保留的行为：检测遇缺层会在当前层数停止并按较短塔激活（未实现「中间缺一层整座不激活」）。
 
 ### 8.2 结构检测（TowerManager）
 
 - 维护已放置火焰石的集合（放置/破坏方块时更新）。
 - `detectBase(fx,fy,fz)`：
-  1. 火焰石下方必须是金刚岩。
+  1. 火焰石下方必须是圆石。
   2. 第 1 层：从下方方块做 4 邻域连通块，大小必须 = 3。
-  3. 第 k 层（k≥2）：上一层每块正下方必须是金刚岩（全支撑）；从这些位置做连通块，大小必须 = 3k，且所有种子在同一连通块内。
+  3. 第 k 层（k≥2）：上一层每块正下方必须是圆石（全支撑）；从这些位置做连通块，大小必须 = 3k，且所有种子在同一连通块内。
   4. 遇到缺块/数量不符 → 停止，层数 = 已通过层数。
 - 同一基座用「顶层连通块坐标 + 顶层 y」做 key 分组。
 - `rebuildTowers()`：重新检测所有已知火焰石 → 按基座分组 → 每组选层数最大者 → 生成激活塔、点光源。
 
 ### 8.3 攻击
 
-- 每 `ATTACK_INTERVAL=1s`：找范围内**最近敌对生物**（3D 距离 ≤ `range * BLOCK_SIZE`）。
-- 造成 **`层数 × ATTACK_PER_LAYER(100)`** 攻击力伤害（`mob:takeDamage`，按护甲结算；Design.md「防御塔」）。
-- 视觉：火焰石到目标的橙色射线光束（0.18s 淡出）+ 塔顶点光源呼吸 + **半透明光罩**（`Sphere.mdl`，半径 = 攻击范围，`SHIELD_ALPHA` 调透明度）。
+- 每 `ATTACK_INTERVAL=2s`：找范围内**最近敌对生物**（3D 距离 ≤ `range * BLOCK_SIZE`）。
+- 锁定目标后发射**独立轨迹火焰弹**（`spawnProjectile`）：自发光小球，速度 `PROJECTILE_SPEED=10` 格/秒，持续追踪目标当前位置，命中判定半径 `PROJECTILE_HIT_RADIUS=0.9` 格。
+- 命中造成 `ATTACK_DAMAGE=10` 伤害（`mob:takeDamage(10)`，按护甲结算）；目标死亡/出范围/失效则重新选目标。
+- 视觉：火焰弹 + 塔顶点光源呼吸 + **半透明光罩**（`Sphere.mdl`，半径 = 攻击范围，`SHIELD_ALPHA` 调透明度）。
 - 火焰石方块本身也发光（blockLight 半径 12）。
 - 防御塔重建触发：
-  - 玩家放置/破坏金刚岩或火焰石（`BlockInteraction` → `onBlockChanged`）
+  - 玩家放置/破坏圆石或火焰石（`BlockInteraction` → `onBlockChanged`）
   - 炸弹人自爆清方块（`MobManager.onBlocksCleared` → `rebuildTowers`）
 
 ### 8.4 出生点预置塔
@@ -623,9 +626,8 @@ blockId
 `Standalone.buildSpawnTower()` 在 `OnWorldReady` 调用：
 
 - 在候选偏移 `(6,0), (-8,0), (0,8), (0,-8), (8,8), (-8,-8), (10,0), (-10,0)` 里选第一个满足：最高地面 > 水位 +2、坡度 ≤2、头顶高度足够（塔高 6 格）。
-- 建 5 层塔：第 k 层（k=1 顶层）3×k 块金刚岩，底层 15 → 顶层 3，累计 45 块 + 火焰石；范围 15 格。
+- 建 5 层塔：第 k 层（k=1 顶层）3×k 块圆石，底层 15 → 顶层 3，累计 45 块 + 火焰石；范围 15 格。
 - 清空脚印（X 宽 3、Z 深 5）上方 6 格，避免树/地形卡进塔里。
-- 本次实测出生塔位置 `(-7,45,0)`（火焰石，基座 5 层范围 15）。
 
 ### 8.5 建造示例
 
@@ -633,16 +635,16 @@ blockId
 
 ```
 [火]          <- 火焰石
-[金][金][金]  <- 3 块金刚岩（同 y）
+[圆][圆][圆]  <- 3 块圆石（同 y）
 ```
 
 **2 层塔（范围 6 格）**
 
 ```
       [火]
-   [金][金][金]      <- 顶层 3 块
-[金][金][金]         <- 底层 6 块（3×2，z 方向两排）
-[金][金][金]
+   [圆][圆][圆]      <- 顶层 3 块
+[圆][圆][圆]         <- 底层 6 块（3×2，z 方向两排）
+[圆][圆][圆]
 ```
 
 ---
@@ -913,25 +915,24 @@ npx -y @taptap/maker preview validate --mode validate \
 
 ### 14.2 防御塔待实现/待对齐（Design.md 最新版）
 
-> 已对齐（2026-11-21）：攻击力改为 **层数 × 100**（原固定 500）、增加**攻击范围半透明光罩**。
+> 已对齐（2026-11-22）：基座方块 **金刚岩 → 圆石**；攻击间隔 **2 秒**；攻击伤害 **10**（`mob:takeDamage(10)`，按护甲结算）；
+> 攻击改为**独立火焰弹轨迹**（速度 10 格/秒、命中判定、追踪目标、目标死亡/出范围重选）。
 > 仍待对齐的点：
 
 | 需求（最新 Design.md） | 当前实现 |
 |---|---|
-| 攻击间隔 **2 秒** | `Config.Tower.ATTACK_INTERVAL = 1.0` |
-| 攻击伤害 **10**（§五 初始参数） | 攻击力 = 层数 × 100（`ATTACK_PER_LAYER`），按护甲结算；与「攻击力 100×层数」新要求一致，未单独对齐「伤害 10」 |
-| 发射**独立火焰弹**（速度 10 格/秒，命中结算） | 瞬时光束（`spawnBeam`）+ 立即 `mob:takeDamage` |
 | 基座中间缺一层 → **整个基座不合法、不能激活** | 自上而下检测，遇缺层会在当前层数停止，可能按较短的塔激活 |
-| 模块：DefenseTowerManager / Detector / Controller / FlameStoneController / FireProjectile | 目前集中在 `building/TowerManager.lua` 一个模块 |
-| 测试：1 层范围 3、3 层范围 9、缺一块、中间缺层、双火焰石、等范围稳定选择、破坏基座/激活火焰石、范围外不攻击、玩家/友好生物不被攻击、不重复攻击 | 已覆盖：2 层范围 6、双火焰石只激活 1 个、击杀范围内僵尸、2 块基座不成塔、破坏顶层失效；**未测试**：1/3 层、范围外、玩家/友好生物、破坏激活火焰石后的接管（代码上有重选逻辑，但没有验收用例）；**未满足**：中间缺层判定、火焰弹 |
+| 模块：DefenseTowerManager / Detector / Controller / FlameStoneController / FireProjectile | 目前集中在 `building/TowerManager.lua` 一个模块（火焰弹逻辑已内置） |
+| 测试：1 层范围 3、3 层范围 9、中间缺层、范围外不攻击、玩家/友好生物不被攻击、破坏激活火焰石后接管 | 已覆盖：2 层范围 6、双火焰石只激活 1 个、火焰弹命中造成伤害、块数不足不成塔、破坏顶层失效；**未覆盖**：1/3 层、中间缺层、范围外、玩家/友好生物、激活火焰石被破坏后的接管 |
 
 可以直接修改的位置：
-- 参数：`config/GameConfig.lua` `Tower`
+- 参数：`config/GameConfig.lua` `Tower`（`ATTACK_DAMAGE / ATTACK_INTERVAL / PROJECTILE_SPEED / PROJECTILE_HIT_RADIUS`）
 - 结构检测/激活：`building/TowerManager.lua`（`detectBase / rebuildTowers`）
-- 火焰弹：可复用/扩展 `items/ProjectileManager.lua`，或新增 `building/FireProjectile.lua`
+- 火焰弹：`building/TowerManager.lua`（`spawnProjectile / updateProjectiles`）
 - 测试：扩展 `devtools/TowerCheck.lua`，覆盖上表未覆盖场景
 
-> 在实现这些新需求前，不要把本文档 §8 的 500/1s/光束描述当作最新设计；它以**当前代码**为准，最新设计以 `Design.md` 为准。
+> 注意：`ATTACK_DAMAGE=10` 是**原始攻击力**，仍走 `mob:takeDamage(10)` 的「攻击力/护甲」结算——对 10 护甲的僵尸实际只造成 1 点伤害。
+> 若希望火焰弹每发固定打 10 血，把 `TowerManager:updateProjectiles` 里的 `takeDamage` 改为直接扣血，或调高 `ATTACK_DAMAGE`。
 
 ### 14.3 Design.md「未实现功能」进度
 
@@ -979,6 +980,7 @@ npx -y @taptap/maker preview validate --mode validate \
 - 持续挖掘（`MiningSystem` + `MiningRules`，进度条 + 裂纹 + 掉落进背包）
 - 暂停菜单 / 设置界面（`PauseMenu` + `SettingsManager`，音量/FOV/渲染距离/灵敏度等持久化到 `settings.json`）
 - 世界存档系统（`SaveManager`，区块 RLE + 玩家/生物/掉落/时间/天气，目录 `saves/<World_xxx>/`）
+- 防御塔基座改为圆石 + 攻击改为独立火焰弹轨迹（伤害 10、间隔 2s、速度 10 格/秒）
 - 自动化验收：ItemUiCheck / TowerCheck / BomberCheck / MobAiCheck / OreCheck / ItemArtCheck / DayNightCheck / WeatherCheck / SurvivalCheck / MiningCheck / SaveLoadCheck
 - Git Stop Hook 自动提交/推送（github/dev）
 

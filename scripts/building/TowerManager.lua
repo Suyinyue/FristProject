@@ -3,39 +3,39 @@
 -- 防御塔（Design.md「建筑」）
 --
 -- 建造规则：
---   - 基座由金刚岩构成，第 k 层（从塔顶往下数）必须正好有 3*k 块
---     金刚岩（顶层 3、第二层 6、第三层 9 ...）
+--   - 基座由圆石构成，第 k 层（从塔顶往下数）必须正好有 3*k 块
+--     圆石（顶层 3、第二层 6、第三层 9 ...）
 --   - 攻击台 = 顶层基座上的火焰石
 --   - 基座有 n 层 → 攻击范围 3n 格
 --   - 同一基座上放多个火焰石时，只激活层数最多（范围最大）的那个
 --
 -- 结构检测：从火焰石下方那一格开始，逐层向下做「同 y 平面连通块」检测，
--- 每层块数必须等于 3*k，且上一层每块正下方都必须是金刚岩（不能悬空）。
+-- 每层块数必须等于 3*k，且上一层每块正下方都必须是圆石（不能悬空）。
 -- 同一顶层连通块 + 顶层 y 视为同一个基座。
 --
--- 攻击：每隔 ATTACK_INTERVAL 秒，对范围内最近的敌对生物造成 500 攻击力
--- （伤害仍按 攻击力/护甲 公式结算），并播放射线光束。
+-- 攻击：每隔 ATTACK_INTERVAL 秒锁定范围内最近的敌对生物，发射独立轨迹的火焰弹，
+-- 命中后造成 ATTACK_DAMAGE 伤害（火焰弹速度 PROJECTILE_SPEED 格/秒）。
 -- ====================================================================
 
 local Config = require("config.GameConfig")
 local Blocks = require("data.BlockRegistry")
 
 local BLOCK_SIZE = Config.World.BLOCK_SIZE
-local ADAMANT = Blocks.ADAMANT
+local BASE_BLOCK = Blocks.COBBLESTONE   -- 基座方块（Design.md：圆石）
 local FLAME = Blocks.FLAME_STONE
 
--- 共享光束材质
+-- 共享火焰弹材质（自发光，不随光照变化）
 ---@type Material|nil
-local beamMaterial = nil
+local projectileMaterial = nil
 
 ---@return Material
-local function getBeamMaterial()
-    if not beamMaterial then
-        beamMaterial = Material:new()
-        beamMaterial:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
-        beamMaterial:SetShaderParameter("MatDiffColor", Variant(Color(2.0, 0.95, 0.30)))
+local function getProjectileMaterial()
+    if not projectileMaterial then
+        projectileMaterial = Material:new()
+        projectileMaterial:SetTechnique(0, cache:GetResource("Technique", "Techniques/NoTextureUnlit.xml"))
+        projectileMaterial:SetShaderParameter("MatDiffColor", Variant(Color(2.0, 0.95, 0.30)))
     end
-    return beamMaterial
+    return projectileMaterial
 end
 
 -- 共享光罩材质（半透明，提示攻击范围）
@@ -65,18 +65,21 @@ end
 ---@field light Light|nil
 ---@field shieldNode Node|nil
 
----@class TowerBeam
+---@class TowerProjectile
 ---@field node Node
+---@field target Mob|nil
+---@field tx number
+---@field ty number
+---@field tz number
+---@field damage number
 ---@field life number
----@field maxLife number
----@field length number
 
 ---@class TowerManager
 ---@field scene Scene
 ---@field world World
 ---@field towers DefenseTower[]
 ---@field flameStones table<string, { x: integer, y: integer, z: integer }>
----@field beams TowerBeam[]
+---@field projectiles TowerProjectile[]
 ---@field mobProvider fun(): Mob[]|nil
 ---@field time number
 local TowerManager = {}
@@ -95,7 +98,7 @@ function TowerManager.new(scene, world)
     self.world = world
     self.towers = {}
     self.flameStones = {}
-    self.beams = {}
+    self.projectiles = {}
     self.mobProvider = nil
     self.time = 0.0
     return self
@@ -126,7 +129,7 @@ local function xzKey(x, z)
     return x .. "," .. z
 end
 
----收集同一 y 平面上的金刚岩连通块（4 邻域），从 seeds 出发
+---收集同一 y 平面上的圆石连通块（4 邻域），从 seeds 出发
 ---@param y integer
 ---@param seeds { x: integer, z: integer }[]
 ---@param limit integer 最多收集多少块（超过说明结构不合法，提前停止）
@@ -139,7 +142,7 @@ function TowerManager:collectLayer(y, seeds, limit)
 
     for _, seed in ipairs(seeds) do
         local k = xzKey(seed.x, seed.z)
-        if not visited[k] and self.world:getBlock(seed.x, y, seed.z) == ADAMANT then
+        if not visited[k] and self.world:getBlock(seed.x, y, seed.z) == BASE_BLOCK then
             visited[k] = true
             queue[#queue + 1] = { x = seed.x, z = seed.z }
             cells[#cells + 1] = { x = seed.x, z = seed.z }
@@ -154,7 +157,7 @@ function TowerManager:collectLayer(y, seeds, limit)
         for _, d in ipairs(dirs) do
             local nx, nz = cur.x + d[1], cur.z + d[2]
             local k = xzKey(nx, nz)
-            if not visited[k] and self.world:getBlock(nx, y, nz) == ADAMANT then
+            if not visited[k] and self.world:getBlock(nx, y, nz) == BASE_BLOCK then
                 visited[k] = true
                 queue[#queue + 1] = { x = nx, z = nz }
                 cells[#cells + 1] = { x = nx, z = nz }
@@ -176,7 +179,7 @@ end
 ---@return { x: integer, z: integer }[]|nil topLayer 顶层基座方块
 function TowerManager:detectBase(fx, fy, fz)
     local cfg = Config.Tower
-    if self.world:getBlock(fx, fy - 1, fz) ~= ADAMANT then
+    if self.world:getBlock(fx, fy - 1, fz) ~= BASE_BLOCK then
         return 0, nil
     end
 
@@ -194,9 +197,9 @@ function TowerManager:detectBase(fx, fy, fz)
         local k = layers + 1
         local yLevel = fy - k
 
-        -- 上一层每一块正下方都必须是金刚岩，否则基座在此结束
+        -- 上一层每一块正下方都必须是圆石，否则基座在此结束
         for _, cell in ipairs(prev) do
-            if self.world:getBlock(cell.x, yLevel, cell.z) ~= ADAMANT then
+            if self.world:getBlock(cell.x, yLevel, cell.z) ~= BASE_BLOCK then
                 return layers, topLayer
             end
         end
@@ -267,7 +270,7 @@ function TowerManager:onBlockChanged(x, y, z, oldType, newType)
         self:trackFlameStone(x, y, z)
     end
 
-    local relevant = oldType == ADAMANT or newType == ADAMANT
+    local relevant = oldType == BASE_BLOCK or newType == BASE_BLOCK
         or oldType == FLAME or newType == FLAME
     if relevant then
         self:rebuildTowers()
@@ -444,60 +447,84 @@ function TowerManager:findTarget(tower)
     return best
 end
 
----发射一条从火焰石到目标的攻击光束
+---发射一颗朝目标飞行的火焰弹（独立轨迹）
 ---@param tower DefenseTower
 ---@param mob Mob
-function TowerManager:spawnBeam(tower, mob)
+function TowerManager:spawnProjectile(tower, mob)
     local from = towerCenter(tower)
     local mp = mob:getPosition()
-    local to = Vector3(mp.x, mp.y + BLOCK_SIZE * 0.6, mp.z)
+    local ty = mp.y + BLOCK_SIZE * 0.5
 
-    local dir = to - from
-    local length = dir:Length()
-    if length < 0.001 then
-        return
-    end
-
-    local node = self.scene:CreateChild("TowerBeam")
-    node.position = (from + to) * 0.5
-
-    local yaw = math.deg(math.atan(dir.x, dir.z))
-    local pitch = -math.deg(math.asin(math.max(-1.0, math.min(1.0, dir.y / length))))
-    node.rotation = Quaternion(pitch, yaw, 0)
-    node.scale = Vector3(0.16, 0.16, length)
+    local node = self.scene:CreateChild("TowerProjectile")
+    node.position = from
+    local size = BLOCK_SIZE * 0.30
+    node.scale = Vector3(size, size, size)
 
     local model = node:CreateComponent("StaticModel")
-    model.model = cache:GetResource("Model", "Models/Box.mdl")
-    model.material = getBeamMaterial()
+    model.model = cache:GetResource("Model", "Models/Sphere.mdl")
+    model.material = getProjectileMaterial()
 
-    self.beams[#self.beams + 1] = {
+    self.projectiles[#self.projectiles + 1] = {
         node = node,
-        life = Config.Tower.BEAM_LIFE,
-        maxLife = Config.Tower.BEAM_LIFE,
-        length = length,
+        target = mob,
+        tx = mp.x,
+        ty = ty,
+        tz = mp.z,
+        damage = Config.Tower.ATTACK_DAMAGE,
+        life = Config.Tower.PROJECTILE_LIFE,
     }
 end
 
----更新光束（淡出后移除）
+---更新火焰弹：朝目标（或最后已知位置）飞行，命中判定后结算伤害
 ---@param dt number
-function TowerManager:updateBeams(dt)
-    for i = #self.beams, 1, -1 do
-        local beam = self.beams[i]
-        beam.life = beam.life - dt
-        if beam.life <= 0 or not beam.node then
-            if beam.node then
-                beam.node:Remove()
-                beam.node = nil
+function TowerManager:updateProjectiles(dt)
+    local cfg = Config.Tower
+    local step = cfg.PROJECTILE_SPEED * BLOCK_SIZE * dt
+    local hitR = cfg.PROJECTILE_HIT_RADIUS * BLOCK_SIZE
+    local hitR2 = hitR * hitR
+
+    for i = #self.projectiles, 1, -1 do
+        local p = self.projectiles[i]
+        p.life = p.life - dt
+        if p.life <= 0 or not p.node then
+            if p.node then
+                p.node:Remove()
+                p.node = nil
             end
-            table.remove(self.beams, i)
+            table.remove(self.projectiles, i)
         else
-            local t = beam.life / beam.maxLife
-            beam.node.scale = Vector3(0.16 * t, 0.16 * t, beam.length)
+            -- 目标仍存活则持续追踪其当前位置
+            if p.target and not p.target:isDead() then
+                local tp = p.target:getPosition()
+                p.tx = tp.x
+                p.ty = tp.y + BLOCK_SIZE * 0.5
+                p.tz = tp.z
+            end
+
+            local pos = p.node.position
+            local dx = p.tx - pos.x
+            local dy = p.ty - pos.y
+            local dz = p.tz - pos.z
+            local dist2 = dx * dx + dy * dy + dz * dz
+
+            if dist2 <= hitR2 or dist2 <= step * step then
+                -- 命中：对目标结算伤害（目标可能已死，此时只消失不结算）
+                if p.target and not p.target:isDead() then
+                    p.target:takeDamage(p.damage)
+                end
+                p.node:Remove()
+                p.node = nil
+                table.remove(self.projectiles, i)
+            else
+                local dist = math.sqrt(dist2)
+                local k = step / dist
+                p.node.position = Vector3(pos.x + dx * k, pos.y + dy * k, pos.z + dz * k)
+            end
         end
     end
 end
 
----每帧更新：攻击范围内敌对生物 + 灯光呼吸 + 光束
+---每帧更新：攻击范围内敌对生物 + 灯光呼吸 + 火焰弹
 ---@param dt number
 function TowerManager:update(dt)
     self.time = self.time + dt
@@ -509,9 +536,7 @@ function TowerManager:update(dt)
         if tower.cooldown <= 0 then
             local target = self:findTarget(tower)
             if target then
-                -- 攻击力 = 100 × 层数（Design.md「防御塔」）
-                target:takeDamage(tower.layers * cfg.ATTACK_PER_LAYER)
-                self:spawnBeam(tower, target)
+                self:spawnProjectile(tower, target)
                 tower.cooldown = cfg.ATTACK_INTERVAL
             else
                 tower.cooldown = cfg.NO_TARGET_RETRY
@@ -523,7 +548,7 @@ function TowerManager:update(dt)
         end
     end
 
-    self:updateBeams(dt)
+    self:updateProjectiles(dt)
 end
 
 -- ====================================================================
@@ -550,18 +575,18 @@ function TowerManager:getTower(index)
     return self.towers[index]
 end
 
----销毁所有灯光和光束
+---销毁所有灯光和火焰弹
 function TowerManager:destroy()
     self:clearTowerLights()
     self.towers = {}
     self.flameStones = {}
 
-    for _, beam in ipairs(self.beams) do
-        if beam.node then
-            beam.node:Remove()
+    for _, p in ipairs(self.projectiles) do
+        if p.node then
+            p.node:Remove()
         end
     end
-    self.beams = {}
+    self.projectiles = {}
 end
 
 return TowerManager

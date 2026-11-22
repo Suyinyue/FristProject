@@ -502,13 +502,13 @@ function Standalone.buildSpawnTower()
         end
     end
 
-    -- 从下往上搭 5 层金刚岩：第 k 层（k=1 为顶层）正好 3*k 块。
+    -- 从下往上搭 5 层圆石：第 k 层（k=1 为顶层）正好 3*k 块。
     -- 每层是一条 X 宽 3、Z 深 k 的矩形：k=5(底)15 块 → k=1(顶)3 块。
     for k = 5, 1, -1 do
         local y = y0 + (5 - k)          -- k=5 → y0，k=1 → y0+4
         for dx = 0, 2 do
             for dz = 0, k - 1 do
-                world_:setBlock(bx + dx, y, bz + dz, Blocks.ADAMANT)
+                world_:setBlock(bx + dx, y, bz + dz, Blocks.COBBLESTONE)
             end
         end
     end
@@ -554,7 +554,7 @@ function Standalone.giveStartingItems()
         { "block:19", 32 },     -- 木板
         { "stick", 16 },
         { "iron_ingot", 16 },
-        { "block:67", 18 },     -- 金刚岩（防御塔基座，可搭 2 层）
+        { "block:13", 18 },     -- 圆石（防御塔基座，可搭 2 层）
         { "block:66", 2 },      -- 火焰石（防御塔攻击台）
     }
 

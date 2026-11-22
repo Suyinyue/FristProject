@@ -7,8 +7,8 @@
 --     --validate-test devtools/TowerCheck.lua --validate-frames 1900 ...
 --
 -- 覆盖：
---   2 层基座（3 + 6 块金刚岩）+ 2 个火焰石 → 只激活 1 座塔、范围 6 格
---   范围内的僵尸被 500 攻击力击杀
+--   2 层基座（3 + 6 块圆石）+ 2 个火焰石 → 只激活 1 座塔、范围 6 格
+--   范围内的僵尸被火焰弹命中并掉血
 --   块数不足的基座不成塔
 --   破坏顶层后防御塔失效
 -- ====================================================================
@@ -53,12 +53,12 @@ V.atFrame(1200, function()
 
     -- 底层：3×2 = 6 块
     for i = 0, 2 do
-        ctx.world:setBlock(bx + i, by, bz, Blocks.ADAMANT)
-        ctx.world:setBlock(bx + i, by, bz + 1, Blocks.ADAMANT)
+        ctx.world:setBlock(bx + i, by, bz, Blocks.COBBLESTONE)
+        ctx.world:setBlock(bx + i, by, bz + 1, Blocks.COBBLESTONE)
     end
     -- 顶层：3 块
     for i = 0, 2 do
-        ctx.world:setBlock(bx + i, by + 1, bz, Blocks.ADAMANT)
+        ctx.world:setBlock(bx + i, by + 1, bz, Blocks.COBBLESTONE)
     end
     -- 同一基座上放两个火焰石
     ctx.world:setBlock(bx, by + 2, bz, Blocks.FLAME_STONE)
@@ -96,11 +96,12 @@ V.atFrame(1320, function()
     V.assert(zombie ~= nil, "僵尸生成失败")
 end)
 
--- 3. 等待防御塔击杀范围内的僵尸（每 1 秒 500 攻击力，两击击杀 100 血僵尸）
+-- 3. 等待防御塔发射火焰弹并命中范围内的僵尸（攻击间隔 2s，伤害 10 / 护甲 10）
 V.atFrame(1600, function()
     V.assert(zombie ~= nil, "僵尸对象丢失")
     if zombie then
-        V.assert(zombie:isDead(), "防御塔没有击杀范围内的敌对生物")
+        V.assert(zombie:getHealth() < zombie.maxHealth,
+            "防御塔火焰弹没有命中并造成伤害（血量 " .. zombie:getHealth() .. "）")
     end
 end)
 
@@ -109,8 +110,8 @@ V.atFrame(1650, function()
     local bx = towerPos.x + 8
     local by = towerPos.y
     local bz = towerPos.z
-    ctx.world:setBlock(bx, by, bz, Blocks.ADAMANT)
-    ctx.world:setBlock(bx + 1, by, bz, Blocks.ADAMANT)
+    ctx.world:setBlock(bx, by, bz, Blocks.COBBLESTONE)
+    ctx.world:setBlock(bx + 1, by, bz, Blocks.COBBLESTONE)
     ctx.world:setBlock(bx, by + 1, bz, Blocks.FLAME_STONE)
     ctx.towerManager:trackFlameStone(bx, by + 1, bz)
     ctx.towerManager:rebuildTowers()
@@ -118,14 +119,14 @@ end)
 
 V.atFrame(1700, function()
     V.assert(ctx.towerManager:getTowerCount() == 2,
-        "只有 2 块金刚岩的基座不应成塔，实际塔数 " .. ctx.towerManager:getTowerCount())
+        "只有 2 块圆石的基座不应成塔，实际塔数 " .. ctx.towerManager:getTowerCount())
 end)
 
--- 5. 破坏原塔顶层的一块金刚岩 → 塔失效
+-- 5. 破坏原塔顶层的一块圆石 → 塔失效
 V.atFrame(1750, function()
     local bx, by, bz = towerPos.x, towerPos.y, towerPos.z
     ctx.world:setBlock(bx, by + 1, bz, Blocks.AIR)
-    ctx.towerManager:onBlockChanged(bx, by + 1, bz, Blocks.ADAMANT, Blocks.AIR)
+    ctx.towerManager:onBlockChanged(bx, by + 1, bz, Blocks.COBBLESTONE, Blocks.AIR)
 end)
 
 V.atFrame(1800, function()

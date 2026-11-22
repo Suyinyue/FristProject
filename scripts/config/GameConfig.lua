@@ -240,13 +240,15 @@ GameConfig.Loot = {
 -- 防御塔（Design.md「建筑」）
 -- ============================================
 GameConfig.Tower = {
-    ATTACK_PER_LAYER = 100.0,   -- 每层基座提供的攻击力（Design.md：攻击力 = 100 × 层数）
-    ATTACK_INTERVAL = 1.0,      -- 攻击间隔（秒）
+    ATTACK_DAMAGE = 10.0,       -- 攻击伤害（固定 10，Design.md「初始攻击参数」）
+    ATTACK_INTERVAL = 2.0,      -- 攻击间隔（秒）
     RANGE_PER_LAYER = 3.0,      -- 基座每层提供 3 格攻击范围
-    LAYER_BLOCK_BASE = 3,       -- 第 k 层（从塔顶往下）需要 3*k 块金刚岩
+    PROJECTILE_SPEED = 10.0,    -- 火焰弹速度（格/秒）
+    PROJECTILE_LIFE = 3.0,      -- 火焰弹最大飞行时间（秒）
+    PROJECTILE_HIT_RADIUS = 0.9,-- 命中判定半径（格）
+    LAYER_BLOCK_BASE = 3,       -- 第 k 层（从塔顶往下）需要 3*k 块圆石
     MAX_LAYERS = 32,            -- 结构检测上限（防御异常结构无限扫描）
     NO_TARGET_RETRY = 0.25,     -- 没有目标时的重试间隔
-    BEAM_LIFE = 0.18,           -- 攻击光束存在时间（秒）
     LIGHT_BASE_RANGE = 8.0,     -- 激活的防御塔火焰石点光源基础范围（世界单位）
     SHIELD_ALPHA = 0.10,        -- 光罩透明度（攻击范围提示）
 }
